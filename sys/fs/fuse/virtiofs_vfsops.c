@@ -188,8 +188,6 @@ virtiofs_vfsop_mount(struct mount *mp)
 	/* Now handshaking with daemon */
 	fuse_internal_send_init(data, td);
 
-	printf("Mounted\n");
-
 	return (0);
 }
 
