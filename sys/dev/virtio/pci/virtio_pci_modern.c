@@ -178,6 +178,8 @@ static uint32_t vtpci_modern_read_device_4(struct vtpci_modern_softc *,
 		    bus_size_t);
 static uint64_t vtpci_modern_read_device_8(struct vtpci_modern_softc *,
 		    bus_size_t);
+static void vtpci_modern_read_device_bytes(struct vtpci_modern_softc *,
+		    bus_size_t, char *, size_t);
 static void	vtpci_modern_write_device_1(struct vtpci_modern_softc *,
 		    bus_size_t, uint8_t);
 static void	vtpci_modern_write_device_2(struct vtpci_modern_softc *,
@@ -672,8 +674,7 @@ vtpci_modern_read_dev_config(device_t dev, bus_size_t offset, void *dst,
 		    vtpci_modern_read_device_8(sc, offset));
 		break;
 	default:
-		panic("%s: device %s invalid device read length %d offset %d",
-		    __func__, device_get_nameunit(dev), length, (int) offset);
+		vtpci_modern_read_device_bytes(sc, offset, dst, length);
 	}
 }
 
@@ -1406,6 +1407,31 @@ vtpci_modern_read_device_8(struct vtpci_modern_softc *sc, bus_size_t off)
 
 	return (((uint64_t) val1 << 32) | val0);
 }
+
+/* 
+ * XXX This call does not account for endianness because it should be used
+ * to read a byte stream from the host. I do not think it is a good idea
+ * to expose it through the same call as vtpci_modern_read_device_[n], but
+ * there is currently no device method through which to cleanly expose it.
+ */
+static void
+vtpci_modern_read_device_bytes(struct vtpci_modern_softc *sc, bus_size_t off,
+		char *buf, size_t len)
+{
+	device_t dev;
+	int gen;
+	int i;
+
+	dev = sc->vtpci_dev;
+
+	do {
+		for (i = 0; i < len; i++) {
+			gen = vtpci_modern_config_generation(dev);
+			buf[i] = vtpci_modern_read_device_1(sc, off + i);
+		}
+	} while (gen != vtpci_modern_config_generation(dev));
+}
+
 
 static void
 vtpci_modern_write_device_1(struct vtpci_modern_softc *sc, bus_size_t off,
