@@ -115,6 +115,10 @@ virtiofs_complete_ticket(void *xtick)
 	fuse_ticket_drop(ftick);
 }
 
+/* 
+ * XXX Possibly roll this into fusefs_vfsop_mount, turns out they are very similar.
+ * At least refactor virtiofs_vfsop_mount and reuse its logic here.
+ */
 static int
 virtiofs_vfsop_mount(struct mount *mp)
 {
@@ -122,6 +126,11 @@ virtiofs_vfsop_mount(struct mount *mp)
 	struct vfsoptlist *opts;
 	struct fuse_data *data;
 	vtfs_instance vtfs;
+	int daemon_timeout;
+	uint32_t max_read;
+	int linux_errnos;
+	uint64_t mntopts;
+	char *subtype;
 	char *tag;
 	int error;
 
@@ -138,6 +147,19 @@ virtiofs_vfsop_mount(struct mount *mp)
 	if (!vfs_getopts(opts, "fspath", &error))
 		return (error);
 
+	mntopts = 0;
+	vfs_flagopt(opts, "push_symlinks_in", &mntopts, FSESS_PUSH_SYMLINKS_IN);
+	vfs_flagopt(opts, "default_permissions", &mntopts, FSESS_DEFAULT_PERMISSIONS);
+	vfs_flagopt(opts, "intr", &mntopts, FSESS_INTR);
+
+	max_read = maxbcachebuf;
+	(void)vfs_scanopt(opts, "max_read=", "%u", &max_read);
+
+	linux_errnos = 0;
+	(void)vfs_scanopt(opts, "linux_errnos", "%d", &linux_errnos);
+	daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
+
+	subtype = vfs_getopts(opts, "subtype=", &error);
 
 	if (mp->mnt_flag & MNT_UPDATE) {
 		/* XXX Handle remount. */
@@ -155,32 +177,48 @@ virtiofs_vfsop_mount(struct mount *mp)
 
 	vtfs_register_cb(vtfs, virtiofs_drop_ticket, virtiofs_complete_ticket);
 
+	/* 
+	 * XXX Retrieve the session from the device if it already exists,
+	 * and only create a new one if it does not exist.
+	 */
 	data = fdata_alloc(NULL, td->td_ucred);
+
+
+	/* XXX Permission checks. */
+
 	data->max_read = maxbcachebuf;
 	data->mp = mp;
 	data->vtfs = vtfs;
-	data->dataflags |= FSESS_VIRTIOFS;
 
-	/* XXX daemoncred check. */
+	/* XXX Handle interrupts. */
+	data->dataflags = mntopts | FSESS_VIRTIOFS;
+
+	if (data->dataflags | FSESS_INTR) {
+		printf("WARNING: virtiofs cannot handle interrupts\n");
+		data->dataflags &= ~FSESS_INTR;
+	}
+
+	/* XXX Do we need an equivalent to the daemoncred check? */
 
 	KASSERT(!fdata_get_dead(data), ("newly created fuse session is dead"));
 
 	vfs_getnewfsid(mp);
-
 	MNT_ILOCK(mp);
-	/* 
-	 * The FS is remote by default. Disable nullfs caching to avoid
-	 * the extra coherence cost, same as FUSE.
-	 *
-	 * XXX Re-add MNTK_USES_BCACHE when we allow in-guest caching.
-	 */
 	mp->mnt_data = data;
 	mp->mnt_flag &= ~MNT_LOCAL;
 	mp->mnt_kern_flag |= MNTK_USES_BCACHE;
+	/* 
+	 * The FS is remote by default. Disable nullfs caching to avoid
+	 * the extra coherence cost, same as FUSE.
+	 */
 	mp->mnt_kern_flag |= MNTK_NULL_NOCACHE;
 	MNT_IUNLOCK(mp);
 	
 	mp->mnt_stat.f_iosize = maxbcachebuf;
+	if (subtype) {
+		strlcat(mp->mnt_stat.f_fstypename, ".", MFSNAMELEN);
+		strlcat(mp->mnt_stat.f_fstypename, subtype, MFSNAMELEN);
+	}
 	memset(mp->mnt_stat.f_mntfromname, 0, MNAMELEN);
 	strlcpy(mp->mnt_stat.f_mntfromname, tag, MNAMELEN);
 	mp->mnt_iosize_max = maxphys;
