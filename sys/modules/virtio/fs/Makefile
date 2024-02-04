@@ -1,4 +1,5 @@
 #
+# $FreeBSD$
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -22,6 +23,11 @@
 # SUCH DAMAGE.
 #
 
-SUBDIR=	virtio pci network block balloon scsi random console p9fs fs
+.PATH: ${SRCTOP}/sys/dev/virtio/fs
 
-.include <bsd.subdir.mk>
+KMOD=  vtfs
+SRCS=  virtio_fs.c
+SRCS+= virtio_bus_if.h virtio_if.h
+SRCS+= bus_if.h device_if.h
+
+.include <bsd.kmod.mk>
