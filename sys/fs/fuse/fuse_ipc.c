@@ -744,7 +744,7 @@ fuse_insert_message(struct fuse_ticket *ftick, bool urgent)
 	fuse_lck_mtx_lock(data->ms_mtx);
 
 	/* Choose between the virtiofs and FUSE paths. */ 
-	if (data->vtfs != NULL)
+	if (fsess_get_virtiofs(data))
 		fuse_notify_virtio_device(ftick, urgent);
 	else
 		fuse_notify_fuse_device(ftick, urgent);
@@ -1092,7 +1092,7 @@ fuse_standard_handler(struct fuse_ticket *ftick, struct uio *uio)
 	struct fuse_data *data = ftick->tk_data;
 	int err = 0;
 
-	if (!data->vtfs)
+	if (!fsess_get_virtiofs(data))
 		err = fticket_pull(ftick, uio);
 
 	fuse_lck_mtx_lock(ftick->tk_aw_mtx);

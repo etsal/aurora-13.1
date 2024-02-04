@@ -159,6 +159,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	data->max_read = maxbcachebuf;
 	data->mp = mp;
 	data->vtfs = vtfs;
+	data->dataflags |= FSESS_VIRTIOFS;
 
 	/* XXX daemoncred check. */
 
