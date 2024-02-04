@@ -65,7 +65,7 @@ struct vfsops virtiofs_vfsops = {
 };
 
 static void
-virtiofs_drop_ticket(void *xtick)
+virtiofs_cb_drop_ticket(void *xtick)
 {
 	struct fuse_ticket *ftick = xtick;
 
@@ -77,7 +77,7 @@ virtiofs_drop_ticket(void *xtick)
 }
 
 static void
-virtiofs_complete_ticket(void *xtick)
+virtiofs_cb_complete_ticket(void *xtick)
 {
 	struct fuse_ticket *ftick = xtick;
 	struct fuse_data *data = ftick->tk_data;
@@ -175,7 +175,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	if (vtfs == NULL)
 		return (error);
 
-	vtfs_register_cb(vtfs, virtiofs_drop_ticket, virtiofs_complete_ticket);
+	vtfs_register_cb(vtfs, virtiofs_cb_drop_ticket, virtiofs_cb_complete_ticket);
 
 	/* 
 	 * XXX Retrieve the session from the device if it already exists,
