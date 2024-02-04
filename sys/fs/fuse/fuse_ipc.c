@@ -76,6 +76,7 @@
 #include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/sdt.h>
+#include <sys/sglist.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
 #include <sys/syscallsubr.h>
@@ -86,6 +87,8 @@
 #include "fuse_node.h"
 #include "fuse_ipc.h"
 #include "fuse_internal.h"
+
+#include <dev/virtio/fs/virtio_fs.h>
 
 SDT_PROVIDER_DECLARE(fusefs);
 /* 
@@ -103,6 +106,7 @@ static void fticket_refresh(struct fuse_ticket *ftick);
 static inline void fticket_reset(struct fuse_ticket *ftick);
 static void fticket_destroy(struct fuse_ticket *ftick);
 static int fticket_wait_answer(struct fuse_ticket *ftick);
+static size_t fuse_calculate_size(struct fuse_ticket *ftick);
 static inline int 
 fticket_aw_pull_uio(struct fuse_ticket *ftick,
     struct uio *uio);
@@ -646,6 +650,77 @@ fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t * handler)
 	fuse_lck_mtx_unlock(ftick->tk_data->aw_mtx);
 }
 
+
+/* Notify users of the FUSE device of the new ticket. */
+static void
+fuse_notify_fuse_device(struct fuse_ticket *ftick, bool urgent)
+{
+	struct fuse_data *data = ftick->tk_data;
+
+	if (urgent)
+		fuse_ms_push_head(ftick);
+	else
+		fuse_ms_push(ftick);
+
+	wakeup_one(data);
+	selwakeuppri(&data->ks_rsel, PZERO + 1);
+	KNOTE_LOCKED(&data->ks_rsel.si_note, 0);
+}
+
+/* Push the ticket to the virtiofs device. */
+static void
+fuse_notify_virtio_device(struct fuse_ticket *ftick, bool urgent)
+{
+	struct fuse_out_header *ohead = &ftick->tk_aw_ohead;
+	struct fuse_data *data = ftick->tk_data;
+	struct fuse_iov *riov, *wiov;
+	int readable, writable;
+	struct sglist *sg;
+	int error;
+
+	riov = &ftick->tk_ms_fiov;
+	wiov = &ftick->tk_aw_fiov;
+
+	/* Preallocate the response buffer. */
+	fiov_adjust(wiov, fuse_calculate_size(ftick));
+	refcount_acquire(&ftick->tk_refcount);
+
+	/* Readable/writable from the host's point of view. */
+	readable = sglist_count(riov->base, riov->len);
+
+	/* Account for the out header. */
+	writable = sglist_count(ohead, sizeof(*ohead)) + 
+		sglist_count(wiov->base, wiov->len);
+
+	sg = sglist_alloc(readable + writable, M_NOWAIT);
+	if (sg == NULL)
+		goto out;
+
+	error = sglist_append(sg, riov->base, riov->len);
+	if (error != 0)
+		goto out;
+
+	error = sglist_append(sg, ohead, sizeof(*ohead));
+	if (error != 0)
+		goto out;
+
+	error = sglist_append(sg, wiov->base, wiov->len);
+	if (error != 0)
+		goto out;
+
+	vtfs_enqueue(data->vtfs, ftick, sg, readable, writable, urgent);
+	vtfs_kick(data->vtfs, urgent);
+	return;
+
+	/* 
+	 * We do not drop the ticket reference because 
+	 * we have moved it to the vtfs device.
+	 */
+out:
+	sglist_free(sg);
+	panic("Failed");
+}
+
 /*
  * Insert a new upgoing ticket into the message queue
  *
@@ -655,23 +730,152 @@ fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t * handler)
 void
 fuse_insert_message(struct fuse_ticket *ftick, bool urgent)
 {
+	struct fuse_data *data = ftick->tk_data;
+
 	if (ftick->tk_flag & FT_DIRTY) {
 		panic("FUSE: ticket reused without being refreshed");
 	}
 	ftick->tk_flag |= FT_DIRTY;
 
-	if (fdata_get_dead(ftick->tk_data)) {
+	if (fdata_get_dead(data)) {
 		return;
 	}
-	fuse_lck_mtx_lock(ftick->tk_data->ms_mtx);
-	if (urgent)
-		fuse_ms_push_head(ftick);
+
+	fuse_lck_mtx_lock(data->ms_mtx);
+
+	/* Choose between the virtiofs and FUSE paths. */ 
+	if (data->vtfs != NULL)
+		fuse_notify_virtio_device(ftick, urgent);
 	else
-		fuse_ms_push(ftick);
-	wakeup_one(ftick->tk_data);
-	selwakeuppri(&ftick->tk_data->ks_rsel, PZERO + 1);
-	KNOTE_LOCKED(&ftick->tk_data->ks_rsel.si_note, 0);
-	fuse_lck_mtx_unlock(ftick->tk_data->ms_mtx);
+		fuse_notify_fuse_device(ftick, urgent);
+
+	fuse_lck_mtx_unlock(data->ms_mtx);
+}
+
+static size_t
+fuse_calculate_size(struct fuse_ticket *ftick)
+{
+	enum fuse_opcode opcode;
+
+	opcode = fticket_opcode(ftick);
+
+	switch (opcode) {
+	case FUSE_BMAP:
+		return (sizeof(struct fuse_bmap_out));
+
+	case FUSE_LINK:
+	case FUSE_LOOKUP:
+	case FUSE_MKDIR:
+	case FUSE_MKNOD:
+	case FUSE_SYMLINK:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 9)) {
+			return (sizeof(struct fuse_entry_out));
+		} else {
+			return (FUSE_COMPAT_ENTRY_OUT_SIZE);
+		}
+
+	case FUSE_FORGET:
+		return (0);
+
+	case FUSE_GETATTR:
+	case FUSE_SETATTR:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 9)) {
+			return (sizeof(struct fuse_attr_out));
+		} else {
+			return (FUSE_COMPAT_ATTR_OUT_SIZE);
+		}
+
+	case FUSE_READLINK:
+		return (PAGE_SIZE);
+
+	case FUSE_UNLINK:
+	case FUSE_RMDIR:
+	case FUSE_RENAME:
+		return (0);
+
+	case FUSE_OPEN:
+		return (sizeof(struct fuse_open_out));
+
+	case FUSE_READ:
+		/* XXX ??? */
+		return (((struct fuse_read_in *)(
+		    (char *)ftick->tk_ms_fiov.base +
+		    sizeof(struct fuse_in_header)
+		    ))->size);
+
+	case FUSE_WRITE:
+		return (sizeof(struct fuse_write_out));
+
+	case FUSE_STATFS:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 4)) {
+			return (sizeof(struct fuse_statfs_out));
+		} else {
+			return (FUSE_COMPAT_STATFS_SIZE);
+		}
+
+	case FUSE_RELEASE:
+	case FUSE_FSYNC:
+	case FUSE_SETXATTR:
+		return (0);
+
+	case FUSE_GETXATTR:
+	case FUSE_LISTXATTR:
+		/* XXX ?? */
+		return (PAGE_SIZE);
+
+	case FUSE_REMOVEXATTR:
+	case FUSE_FLUSH:
+		return (0);
+
+	case FUSE_INIT:
+		/* XXX? */
+		return (PAGE_SIZE);
+
+	case FUSE_OPENDIR:
+		return (sizeof(struct fuse_open_out));
+
+	case FUSE_READDIR:
+		/* XXX EXPLORATORY HACK */
+		return (4096);
+		return (((struct fuse_read_in *)(
+		    (char *)ftick->tk_ms_fiov.base +
+		    sizeof(struct fuse_in_header)
+		    ))->size);
+
+	case FUSE_RELEASEDIR:
+	case FUSE_FSYNCDIR:
+		return (0);
+
+	case FUSE_GETLK:
+		return (sizeof(struct fuse_lk_out));
+
+	case FUSE_SETLK:
+	case FUSE_SETLKW:
+	case FUSE_ACCESS:
+		return (0);
+
+	case FUSE_CREATE:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 9)) {
+			return (sizeof(struct fuse_entry_out) +
+			    sizeof(struct fuse_open_out));
+		} else {
+			return (FUSE_COMPAT_ENTRY_OUT_SIZE +
+			    sizeof(struct fuse_open_out));
+		}
+
+	case FUSE_DESTROY:
+	case FUSE_FALLOCATE:
+		return (0);
+
+	case FUSE_LSEEK:
+		return (sizeof(struct fuse_lseek_out));
+
+	case FUSE_COPY_FILE_RANGE:
+		return (sizeof(struct fuse_write_out));
+
+	default:
+		panic("FUSE: opcodes out of sync (%d)\n", opcode);
+	}
 }
 
 static int
@@ -885,9 +1089,11 @@ fuse_setup_ihead(struct fuse_in_header *ihead, struct fuse_ticket *ftick,
 static int
 fuse_standard_handler(struct fuse_ticket *ftick, struct uio *uio)
 {
+	struct fuse_data *data = ftick->tk_data;
 	int err = 0;
 
-	err = fticket_pull(ftick, uio);
+	if (!data->vtfs)
+		err = fticket_pull(ftick, uio);
 
 	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
 

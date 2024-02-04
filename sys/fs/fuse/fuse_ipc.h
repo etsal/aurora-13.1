@@ -219,6 +219,8 @@ struct fuse_data {
 	uint64_t			isimpl;
 	uint64_t			mnt_flag;
 	enum fuse_data_cache_mode	cache_mode;
+
+	struct vtfs_softc 		*vtfs;
 };
 
 #define FSESS_DEAD                0x0001 /* session is to be closed */
