@@ -572,42 +572,20 @@ vtfs_enqueue(struct vtfs_softc *sc, void *ftick, struct sglist *sg,
 		fsq = &sc->vtfs_fsqs[VTFS_FORGET_FSQ];
 	else
 		fsq = &sc->vtfs_fsqs[VTFS_REGULAR_FSQ];
+
 	FSQ_LOCK(fsq);
 	vq = fsq->vtfsq_vq;
 
 	KASSERT(sg->sg_nseg == readable + writable, ("inconsistent segmentation"));
 
-	/* XXX Just panic for now, we're not handling full queues. */
 	error = virtqueue_enqueue(vq, ftick, sg, readable, writable);
-	if (error != 0)
-		panic("Queue full");
-
-	fsq->vtfsq_sg = sg;
-	FSQ_UNLOCK(fsq);
-
-
-	return (0);
-}
-
-int
-vtfs_kick(struct vtfs_softc *sc, bool urgent)
-{
-	struct vtfs_fsq *fsq;
-
-	fsq = (urgent) ? &sc->vtfs_fsqs[VTFS_FORGET_FSQ] : &sc->vtfs_fsqs[VTFS_REGULAR_FSQ];
-
-	if (fsq->vtfsq_sg == NULL)
-		return (EINVAL);
-
-	FSQ_LOCK(fsq);
-	virtqueue_notify(fsq->vtfsq_vq);
-
-	sglist_free(fsq->vtfsq_sg);
-	fsq->vtfsq_sg = NULL;
+	if (error == 0)
+		virtqueue_notify(vq);
 
 	FSQ_UNLOCK(fsq);
+	sglist_free(sg);
 
-	return (0);
+	return (error);
 }
 
 /* XXX This is a misnomer, we are "draining" the vq not in 

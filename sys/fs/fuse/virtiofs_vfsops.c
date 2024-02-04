@@ -47,6 +47,8 @@ __FBSDID("$FreeBSD$");
 #include <compat/linux/linux_errno.h>
 #include <compat/linux/linux_errno.inc>
 
+#define VIRTIOFS_THREADS_TQ (8)
+
 vfs_fhtovp_t fuse_vfsop_fhtovp;
 static vfs_mount_t virtiofs_vfsop_mount;
 static vfs_unmount_t virtiofs_vfsop_unmount;
@@ -64,10 +66,118 @@ struct vfsops virtiofs_vfsops = {
 	.vfs_vget = fuse_vfsop_vget,
 };
 
+/* Push the ticket to the virtiofs device. */
+static int
+virtiofs_enqueue(struct fuse_ticket *ftick)
+{
+	struct fuse_out_header *ohead = &ftick->tk_aw_ohead;
+	struct fuse_data *data = ftick->tk_data;
+	struct fuse_iov *riov, *wiov;
+	int readable, writable;
+	struct sglist *sg;
+	bool urgent;
+	int error;
+
+	urgent = (fticket_opcode(ftick) == FUSE_FORGET);
+
+	riov = &ftick->tk_ms_fiov;
+	wiov = &ftick->tk_aw_fiov;
+
+	/* Preallocate the response buffer. */
+	fiov_adjust(wiov, fticket_out_size(ftick));
+	refcount_acquire(&ftick->tk_refcount);
+
+	/* Readable/writable from the host's point of view. */
+	readable = sglist_count(riov->base, riov->len);
+
+	/* Account for the out header. */
+	writable = sglist_count(ohead, sizeof(*ohead)) + 
+		sglist_count(wiov->base, wiov->len);
+
+	sg = sglist_alloc(readable + writable, M_NOWAIT);
+	if (sg == NULL) {
+		error = ENOMEM;
+		goto out;
+	}
+
+	error = sglist_append(sg, riov->base, riov->len);
+	if (error != 0)
+		goto out;
+
+	error = sglist_append(sg, ohead, sizeof(*ohead));
+	if (error != 0)
+		goto out;
+
+	error = sglist_append(sg, wiov->base, wiov->len);
+	if (error != 0)
+		goto out;
+
+	error = vtfs_enqueue(data->vtfs, ftick, sg, readable, writable, urgent);
+
+	/* 
+	 * The enqueue call destroys the scatter-gather array both on success and
+	 * on failure, so no need to clean it up.
+	 */
+
+	return (error);
+
+out:
+	sglist_free(sg);
+	return (error);
+}
+
+static void
+virtiofs_flush(void *xdata, int __unused pending)
+{
+	struct fuse_ticket *ftick;
+	struct fuse_data *data = xdata;
+	int error;
+
+	/* XXX Account for dead sessions. */
+
+	fuse_lck_mtx_lock(data->ms_mtx);
+
+	while (!STAILQ_EMPTY(&data->ms_head)) {
+		ftick = STAILQ_FIRST(&data->ms_head);
+
+		error = virtiofs_enqueue(ftick);
+		if (error != 0) {
+			if (error == EBUSY)
+				error = 0;
+			break;
+		} 
+
+		STAILQ_REMOVE_HEAD(&data->ms_head, tk_ms_link);
+		data->ms_count--;
+
+		KASSERT(ftick != STAILQ_FIRST(&data->ms_head), ("ticket still in the queue"));
+
+#ifdef INVARIANTS
+		MPASS(data->ms_count >= 0);
+		ftick->tk_ms_link.stqe_next = NULL;
+#endif
+
+		FUSE_ASSERT_MS_DONE(ftick);
+		fuse_ticket_drop(ftick);
+	}
+
+	fuse_lck_mtx_unlock(data->ms_mtx);
+
+	if (error != 0)
+		printf("Warning: %s failed with %d\n", __func__, error);
+
+	return;
+}
+
 static void
 virtiofs_cb_drop_ticket(void *xtick)
 {
 	struct fuse_ticket *ftick = xtick;
+	struct fuse_data *data = ftick->tk_data;
+
+	fuse_lck_mtx_lock(data->aw_mtx);
+	fuse_aw_remove(ftick);
+	fuse_lck_mtx_lock(data->aw_mtx);
 
 	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
 	KASSERT(!fticket_answered(ftick), ("ticket already answered"));
@@ -89,10 +199,9 @@ virtiofs_cb_complete_ticket(void *xtick)
 
 	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
 
-	KASSERT(!fticket_answered(ftick), ("ticket already answered"));
-
 	/* XXX Do the ohead checks here. */
 
+	/* XXX Merge this with the dev write method that does the same thing. */
 	if (ftick->tk_aw_ohead.error != 0) {
 		err = -ftick->tk_aw_ohead.error;
 		if (err < 0 || err >= nitems(linux_to_bsd_errtbl))
@@ -102,6 +211,7 @@ virtiofs_cb_complete_ticket(void *xtick)
 		ftick->tk_aw_ohead.error = linux_to_bsd_errtbl[err];
 	}
 
+	/* XXX Check who this can happen in virtiofs. */
 	if (ftick->irq_unique > 0)
 		panic("Unhandled interruption");
 
@@ -126,7 +236,6 @@ virtiofs_vfsop_mount(struct mount *mp)
 	struct vfsoptlist *opts;
 	struct fuse_data *data;
 	vtfs_instance vtfs;
-	int daemon_timeout;
 	uint32_t max_read;
 	int linux_errnos;
 	uint64_t mntopts;
@@ -157,7 +266,6 @@ virtiofs_vfsop_mount(struct mount *mp)
 
 	linux_errnos = 0;
 	(void)vfs_scanopt(opts, "linux_errnos", "%d", &linux_errnos);
-	daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
 
 	subtype = vfs_getopts(opts, "subtype=", &error);
 
@@ -183,12 +291,19 @@ virtiofs_vfsop_mount(struct mount *mp)
 	 */
 	data = fdata_alloc(NULL, td->td_ucred);
 
+	data->vtfs_tq = taskqueue_create("virtiofstq", M_NOWAIT, taskqueue_thread_enqueue, 
+			&data->vtfs_tq);
+	if (data->vtfs_tq == NULL)
+		panic("ENOMEM when initializing taskqueue");
+
+	data->vtfs = vtfs;
+	data->vtfs_flush_cb = virtiofs_flush;
 
 	/* XXX Permission checks. */
 
 	data->max_read = maxbcachebuf;
+	data->daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
 	data->mp = mp;
-	data->vtfs = vtfs;
 
 	/* XXX Handle interrupts. */
 	data->dataflags = mntopts | FSESS_VIRTIOFS;
@@ -222,6 +337,10 @@ virtiofs_vfsop_mount(struct mount *mp)
 	memset(mp->mnt_stat.f_mntfromname, 0, MNAMELEN);
 	strlcpy(mp->mnt_stat.f_mntfromname, tag, MNAMELEN);
 	mp->mnt_iosize_max = maxphys;
+
+	error = taskqueue_start_threads(&data->vtfs_tq, VIRTIOFS_THREADS_TQ, PVFS, "virtiofs_tq"); 
+	if (error != 0)
+		panic("error when initializing taskqueue threads");
 
 	/* Now handshaking with daemon */
 	fuse_internal_send_init(data, td);
@@ -279,6 +398,9 @@ virtiofs_vfsop_unmount(struct mount *mp, int mntflags)
 	vtfs_drain(vtfs);
 
 	fdata_set_dead(data);
+
+	taskqueue_drain_all(data->vtfs_tq);
+	taskqueue_free(data->vtfs_tq);
 
 alreadydead:
 	FUSE_LOCK();

@@ -39,7 +39,6 @@ typedef void (*vtfs_fuse_cb)(void *);
 
 void vtfs_register_cb(vtfs_instance, vtfs_fuse_cb, vtfs_fuse_cb);
 int vtfs_enqueue(vtfs_instance, void *, struct sglist *, int, int, bool);
-int vtfs_kick(vtfs_instance, bool);
 vtfs_instance vtfs_find(char *);
 void vtfs_drain(vtfs_instance);
 void vtfs_unregister_cb(vtfs_instance);

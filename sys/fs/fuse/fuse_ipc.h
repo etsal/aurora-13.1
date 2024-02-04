@@ -65,6 +65,7 @@
 
 #include <sys/param.h>
 #include <sys/refcount.h>
+#include <sys/taskqueue.h>
 
 enum fuse_data_cache_mode {
 	FUSE_CACHE_UC,
@@ -130,6 +131,8 @@ struct fuse_ticket {
 	struct mtx			tk_aw_mtx;
 	fuse_handler_t			*tk_aw_handler;
 	TAILQ_ENTRY(fuse_ticket)	tk_aw_link;
+
+	struct task			tk_vtfs_tk;
 };
 
 #define FT_ANSW  0x01  /* request of ticket has already been answered */
@@ -168,6 +171,7 @@ fticket_opcode(struct fuse_ticket *ftick)
 }
 
 int fticket_pull(struct fuse_ticket *ftick, struct uio *uio);
+size_t fticket_out_size(struct fuse_ticket *ftick);
 
 /*
  * The data representing a FUSE session.
@@ -220,7 +224,11 @@ struct fuse_data {
 	uint64_t			mnt_flag;
 	enum fuse_data_cache_mode	cache_mode;
 
+	/* Fields necessary for virtiofs. */
 	struct vtfs_softc 		*vtfs;
+	struct taskqueue		*vtfs_tq;
+	void 				(*vtfs_flush_cb)(void*, int);
+
 };
 
 #define FSESS_DEAD                0x0001 /* session is to be closed */
