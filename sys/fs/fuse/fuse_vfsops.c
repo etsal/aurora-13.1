@@ -109,12 +109,12 @@ SDT_PROBE_DEFINE2(fusefs, , vfsops, trace, "int", "char*");
 #define PRIV_VFS_FUSE_SYNC_UNMOUNT PRIV_VFS_MOUNT_NONUSER
 #endif
 
-static vfs_fhtovp_t fuse_vfsop_fhtovp;
+vfs_fhtovp_t fuse_vfsop_fhtovp;
 static vfs_mount_t fuse_vfsop_mount;
 static vfs_unmount_t fuse_vfsop_unmount;
-static vfs_root_t fuse_vfsop_root;
-static vfs_statfs_t fuse_vfsop_statfs;
-static vfs_vget_t fuse_vfsop_vget;
+vfs_root_t fuse_vfsop_root;
+vfs_statfs_t fuse_vfsop_statfs;
+vfs_vget_t fuse_vfsop_vget;
 
 struct vfsops fuse_vfsops = {
 	.vfs_fhtovp = fuse_vfsop_fhtovp,
@@ -262,7 +262,7 @@ out:
 	return err;
 }
 
-static int
+int
 fuse_vfsop_fhtovp(struct mount *mp, struct fid *fhp, int flags,
 	struct vnode **vpp)
 {
@@ -529,7 +529,7 @@ alreadydead:
 
 SDT_PROBE_DEFINE1(fusefs, , vfsops, invalidate_without_export,
 	"struct mount*");
-static int
+int
 fuse_vfsop_vget(struct mount *mp, ino_t ino, int flags, struct vnode **vpp)
 {
 	struct fuse_data *data = fuse_get_mpdata(mp);
@@ -595,7 +595,7 @@ out:
 	return error;
 }
 
-static int
+int
 fuse_vfsop_root(struct mount *mp, int lkflags, struct vnode **vpp)
 {
 	struct fuse_data *data = fuse_get_mpdata(mp);
@@ -631,7 +631,7 @@ fuse_vfsop_root(struct mount *mp, int lkflags, struct vnode **vpp)
 	return err;
 }
 
-static int
+int
 fuse_vfsop_statfs(struct mount *mp, struct statfs *sbp)
 {
 	struct fuse_dispatcher fdi;
