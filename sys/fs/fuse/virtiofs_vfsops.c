@@ -173,11 +173,6 @@ static void
 virtiofs_cb_drop_ticket(void *xtick)
 {
 	struct fuse_ticket *ftick = xtick;
-	struct fuse_data *data = ftick->tk_data;
-
-	fuse_lck_mtx_lock(data->aw_mtx);
-	fuse_aw_remove(ftick);
-	fuse_lck_mtx_lock(data->aw_mtx);
 
 	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
 	KASSERT(!fticket_answered(ftick), ("ticket already answered"));
