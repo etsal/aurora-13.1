@@ -73,8 +73,8 @@ virtiofs_enqueue(struct fuse_ticket *ftick)
 	struct fuse_out_header *ohead = &ftick->tk_aw_ohead;
 	struct fuse_data *data = ftick->tk_data;
 	struct fuse_iov *riov, *wiov;
+	struct sglist *sg = NULL;
 	int readable, writable;
-	struct sglist *sg;
 	bool urgent;
 	int error;
 
@@ -83,9 +83,12 @@ virtiofs_enqueue(struct fuse_ticket *ftick)
 	riov = &ftick->tk_ms_fiov;
 	wiov = &ftick->tk_aw_fiov;
 
-	/* Preallocate the response buffer. */
-	fiov_adjust(wiov, fticket_out_size(ftick));
 	refcount_acquire(&ftick->tk_refcount);
+
+	/* Preallocate the response buffer. */
+	error = fiov_adjust(wiov, fticket_out_size(ftick), M_NOWAIT);
+	if (error != 0)
+		goto out;
 
 	/* Readable/writable from the host's point of view. */
 	readable = sglist_count(riov->base, riov->len);
@@ -122,7 +125,10 @@ virtiofs_enqueue(struct fuse_ticket *ftick)
 	return (error);
 
 out:
-	sglist_free(sg);
+	fuse_ticket_drop(ftick);
+	if (sg != NULL)
+		sglist_free(sg);
+
 	return (error);
 }
 
