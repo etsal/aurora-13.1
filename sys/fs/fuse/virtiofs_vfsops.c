@@ -236,6 +236,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	struct thread *td = curthread;
 	struct vfsoptlist *opts;
 	struct fuse_data *data;
+	int daemon_timeout;
 	vtfs_instance vtfs;
 	uint32_t max_read;
 	int linux_errnos;
@@ -268,6 +269,9 @@ virtiofs_vfsop_mount(struct mount *mp)
 	linux_errnos = 0;
 	(void)vfs_scanopt(opts, "linux_errnos", "%d", &linux_errnos);
 
+	/* XXX Handle timeout */
+	daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
+
 	subtype = vfs_getopts(opts, "subtype=", &error);
 
 	if (mp->mnt_flag & MNT_UPDATE) {
@@ -288,9 +292,15 @@ virtiofs_vfsop_mount(struct mount *mp)
 
 	/* 
 	 * XXX Retrieve the session from the device if it already exists,
-	 * and only create a new one if it does not exist.
+	 * and only create a new one if it does not .
 	 */
 	data = fdata_alloc(NULL, td->td_ucred);
+
+	FUSE_LOCK();
+	if (fdata_get_dead(data)) {
+		/* XXX Proper error handling. */
+		panic("Data is already dead");
+	}
 
 	data->vtfs_tq = taskqueue_create("virtiofstq", M_NOWAIT, taskqueue_thread_enqueue, 
 			&data->vtfs_tq);
@@ -300,21 +310,15 @@ virtiofs_vfsop_mount(struct mount *mp)
 	data->vtfs = vtfs;
 	data->vtfs_flush_cb = virtiofs_flush;
 
-	/* XXX Permission checks. */
+	/* XXX Permission checks on whether we are allowed to mount the virtiofs. */
 
-	data->max_read = maxbcachebuf;
-	data->daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
 	data->mp = mp;
-
-	/* XXX Handle interrupts. */
-	data->dataflags = mntopts | FSESS_VIRTIOFS;
-
-	if (data->dataflags | FSESS_INTR) {
-		printf("WARNING: virtiofs cannot handle interrupts\n");
-		data->dataflags &= ~FSESS_INTR;
-	}
-
-	/* XXX Do we need an equivalent to the daemoncred check? */
+	data->dataflags |= mntopts | FSESS_VIRTIOFS;
+	data->max_read = max_read;
+	data->daemon_timeout = daemon_timeout;
+	data->linux_errnos = linux_errnos;
+	data->mnt_flag = mp->mnt_flag & MNT_UPDATEMASK;
+	FUSE_UNLOCK();
 
 	KASSERT(!fdata_get_dead(data), ("newly created fuse session is dead"));
 
