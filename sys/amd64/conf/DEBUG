@@ -1,0 +1,12 @@
+
+include GENERIC-KASAN
+
+ident   DEBUG
+
+options 	INVARIANTS
+options 	INVARIANT_SUPPORT
+options 	DIAGNOSTIC
+options		KDB
+options		KDB_TRACE
+options		DDB
+options		DDB_NUMSYM
