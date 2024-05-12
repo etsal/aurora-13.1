@@ -66,6 +66,12 @@
 /* XXX Make this a sysctl. */
 #define VTBOUNCE_MAPSZ (1024 * 1024 * 10)
 
+#define VTBOUNCE_WARN(format, ...)                                            \
+	do {                                                                  \
+		printf("(%s:%d) " format, __func__, __LINE__, ##__VA_ARGS__); \
+	} while (0)
+
+
 /*
  * Information on a bounce character device instance.
  */
@@ -106,6 +112,7 @@ vtmmio_get_vtb(device_t dev)
 static int
 vtmmio_bounce_probe(device_t dev)
 {
+	VTBOUNCE_WARN("\n");
 	printf("virtio bounce can only be explicitly added\n");
 	return (EINVAL);
 }
@@ -115,6 +122,7 @@ vtmmio_bounce_attach(device_t dev)
 {
 	struct vtmmio_softc *sc;
 
+	VTBOUNCE_WARN("\n");
 	sc = device_get_softc(dev);
 	/* Fake platform to trigger virtio_mmio_note() on writes. */
 	sc->platform = VTBOUNCE_PLATFORM;
@@ -128,6 +136,7 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 {
 	struct vtbounce_softc *sc;
 
+	VTBOUNCE_WARN("\n");
 	sc = vtmmio_get_vtb(dev);
 
 	mtx_lock(&sc->vtb_mtx);
@@ -197,8 +206,10 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 	baseaddr = VM_MIN_KERNEL_ADDRESS;
 #endif
 
+	VTBOUNCE_WARN("\n");
 	vm_object_reference(obj);
 
+	VTBOUNCE_WARN("\n");
 	error = vm_map_find(kernel_map, obj, 0, &baseaddr, bytes, 0,
 		VMFS_OPTIMAL_SPACE, VM_PROT_ALL, VM_PROT_ALL, 0);
 	if (error != KERN_SUCCESS) {
@@ -206,6 +217,7 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 		return (ENOMEM);
 	}
 
+	VTBOUNCE_WARN("\n");
 	error = vm_map_wire(kernel_map, baseaddr, baseaddr + bytes,
 	    VM_MAP_WIRE_SYSTEM|VM_MAP_WIRE_NOHOLES);
 	if (error != KERN_SUCCESS) {
@@ -213,6 +225,7 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 		return (ENOMEM);
 	}
 
+	VTBOUNCE_WARN("\n");
 	sc->vtb_baseaddr = baseaddr;
 	sc->vtb_bytes = bytes;
 
@@ -230,16 +243,22 @@ virtio_bounce_dtor(void *arg)
 		VIRTIO_DETACH(sc->vtb_dev);
 		*/
 
+	VTBOUNCE_WARN("\n");
 	if (sc->vtb_baseaddr != 0) {
-		vm_map_delete(kernel_map, sc->vtb_baseaddr,
+		vm_map_remove(kernel_map, sc->vtb_baseaddr,
 			sc->vtb_baseaddr + sc->vtb_bytes);
 	}
 
+	VTBOUNCE_WARN("\n");
 	vm_object_deallocate(sc->vtb_object);
 
+	VTBOUNCE_WARN("\n");
 	knlist_delete(&sc->vtb_note, curthread, 0);
 	knlist_destroy(&sc->vtb_note);
 	mtx_destroy(&sc->vtb_mtx);
+
+	VTBOUNCE_WARN("\n");
+	free(sc, M_DEVBUF);
 }
 
 static int
@@ -249,10 +268,12 @@ virtio_bounce_open(struct cdev *cdev, int oflags, int devtype, struct thread *td
 	struct vtbounce_softc *sc;
 	int error;
 
+	VTBOUNCE_WARN("\n");
 	sc = malloc(sizeof(struct vtbounce_softc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (sc == NULL)
 		return (ENOMEM);
 
+	VTBOUNCE_WARN("\n");
 	mtx_init(&sc->vtb_mtx, "vtbounce", NULL, MTX_DEF);
 	knlist_init_mtx(&sc->vtb_note, &sc->vtb_mtx);
 				
@@ -263,16 +284,19 @@ virtio_bounce_open(struct cdev *cdev, int oflags, int devtype, struct thread *td
 		return (ENOMEM);
 	}
 
+	VTBOUNCE_WARN("\n");
 	error = virtio_bounce_map_kernel(sc);
 	if (error != 0) {
 		virtio_bounce_dtor(sc);
 		return (error);
 	}
 
+	VTBOUNCE_WARN("\n");
 	error = devfs_set_cdevpriv((void *)sc, virtio_bounce_dtor);
 	if (error != 0)
 		virtio_bounce_dtor(sc);
 
+	VTBOUNCE_WARN("\n");
 	return (error);
 }
 
@@ -283,13 +307,16 @@ virtio_bounce_mmap_single(struct cdev *cdev, vm_ooffset_t *offset,
 	struct vtbounce_softc *sc;
 	int error;
 
+	VTBOUNCE_WARN("\n");
 	error = devfs_get_cdevpriv((void **)&sc);
 	if (error != 0)
 		return (error);
 
+	VTBOUNCE_WARN("\n");
 	if (*offset + size > sc->vtb_bytes)
 		return (EINVAL);
 
+	VTBOUNCE_WARN("\n");
 	vm_object_reference(sc->vtb_object);
 	*objp = sc->vtb_object;
 
@@ -305,13 +332,20 @@ virtio_bounce_init(void)
 	device_t child;
 	int error;
 
-	/* XXX Prevent initializing the same device twice. */
-
+	VTBOUNCE_WARN("\n");
 	/* Retrieve the mapping address/size. */
 	error = devfs_get_cdevpriv((void **)&vtbsc);
 	if (error != 0)
 		return (error);
 
+	VTBOUNCE_WARN("\n");
+	mtx_lock(&vtbsc->vtb_mtx);
+	if (vtbsc->vtb_dev != NULL) {
+		mtx_unlock(&vtbsc->vtb_mtx);
+		return (EINVAL);
+	}
+
+	VTBOUNCE_WARN("\n");
 	/* Create the child and assign its resources. */
 	child = BUS_ADD_CHILD(/* XXX Parent bus */0, 0, vtmmio_bounce_driver.name, -1);
 	bus_set_resource(child, SYS_RES_MEMORY, 0, vtbsc->vtb_baseaddr,
@@ -323,6 +357,9 @@ virtio_bounce_init(void)
 	mmiosc->vtmb_bounce = vtbsc;
 	vtbsc->vtb_dev = child;
 
+	mtx_unlock(&vtbsc->vtb_mtx);
+	VTBOUNCE_WARN("\n");
+
 	return (0);
 }
 
@@ -330,6 +367,7 @@ virtio_bounce_init(void)
 static void
 virtio_bounce_fini(struct vtbounce_softc *sc)
 {
+	VTBOUNCE_WARN("\n");
 	panic("unimplemented");
 }
 
@@ -341,6 +379,7 @@ virtio_bounce_fini(struct vtbounce_softc *sc)
 static void
 virtio_bounce_kick(struct vtbounce_softc *sc)
 {
+	VTBOUNCE_WARN("\n");
 	sc->vtb_intr(sc->vtb_intr_arg);
 }
 
@@ -352,6 +391,7 @@ virtio_bounce_kick(struct vtbounce_softc *sc)
 static void
 virtio_bounce_ack(struct vtbounce_softc *sc)
 {
+	VTBOUNCE_WARN("\n");
 	mtx_lock(&sc->vtb_mtx);
 	wakeup(sc);
 	mtx_unlock(&sc->vtb_mtx);
@@ -364,10 +404,12 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, stru
 	struct vtbounce_softc *sc;
 	int ret = 0;
 
+	VTBOUNCE_WARN("\n");
 	ret = devfs_get_cdevpriv((void **)&sc);
 	if (ret != 0)
 		return (ret);
 
+	VTBOUNCE_WARN("\n");
 	switch (cmd) {
 	case VIRTIO_BOUNCE_INIT:
 		ret = virtio_bounce_init();
@@ -390,6 +432,7 @@ static void
 virtio_bounce_filt_detach(struct knote *kn)
 {
 	/* XXX Remove the control block of the softc as private data. */
+	VTBOUNCE_WARN("\n");
 }
 
 static int
@@ -397,6 +440,7 @@ virtio_bounce_filt_read(struct knote *kn, long hint)
 {
 	struct vtbounce_softc *sc;
 
+	VTBOUNCE_WARN("\n");
 	sc = (struct vtbounce_softc *)kn->kn_hook;
 	mtx_lock(&sc->vtb_mtx);
 	if (sc->vtb_offset == 0) {
@@ -406,6 +450,7 @@ virtio_bounce_filt_read(struct knote *kn, long hint)
 
 	kn->kn_data = sc->vtb_offset;
 	sc->vtb_offset = 0;
+	VTBOUNCE_WARN("\n");
 
 	mtx_unlock(&sc->vtb_mtx);
 	
@@ -424,18 +469,22 @@ virtio_bounce_kqfilter(struct cdev *dev, struct knote *kn)
 	struct vtbounce_softc *sc;
 	int error;
 
+	VTBOUNCE_WARN("\n");
 	error = devfs_get_cdevpriv((void **)&sc);
 	if (error != 0)
 		return (error);
 
+	VTBOUNCE_WARN("\n");
 	if (kn->kn_filter != EVFILT_READ) {
 		kn->kn_data = EINVAL;
 		return (EINVAL);
 	}
 
+	VTBOUNCE_WARN("\n");
 	kn->kn_fop = &virtio_bounce_rfiltops;
 	kn->kn_hook = sc;
 
+	VTBOUNCE_WARN("\n");
 	return (0);
 
 }
@@ -456,6 +505,7 @@ virtio_bounce_dev_init(void)
 	    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, "virtio_bounce");
 	if (bouncedev == NULL)
 		return (ENOMEM);
+	VTBOUNCE_WARN("\n");
 
 	return (0);
 }
@@ -463,6 +513,7 @@ virtio_bounce_dev_init(void)
 static void
 virtio_bounce_dev_destroy(void)
 {
+	VTBOUNCE_WARN("\n");
 	MPASS(bouncedev != NULL);
 	destroy_dev(bouncedev);
 }
