@@ -58,6 +58,7 @@
 #include <dev/virtio/virtqueue.h>
 #include <dev/virtio/mmio/virtio_mmio.h>
 
+#include "virtio_mmio_bounce_ioctl.h"
 #include "virtio_mmio_if.h"
 
 #define VTBOUNCE_PLATFORM ((device_t)0x0badcafe)
@@ -223,8 +224,11 @@ virtio_bounce_dtor(void *arg)
 {
 	struct vtbounce_softc *sc = (struct vtbounce_softc *)arg;
 
+	/* XXX Fix device detach */
+	/*
 	if (sc->vtb_dev != 0)
 		VIRTIO_DETACH(sc->vtb_dev);
+		*/
 
 	if (sc->vtb_baseaddr != 0) {
 		vm_map_delete(kernel_map, sc->vtb_baseaddr,
@@ -274,7 +278,7 @@ virtio_bounce_open(struct cdev *cdev, int oflags, int devtype, struct thread *td
 
 static int
 virtio_bounce_mmap_single(struct cdev *cdev, vm_ooffset_t *offset,
-		vm_size_t size, vm_object_t **objp, int nprot)
+		vm_size_t size, vm_object_t *objp, int nprot)
 {
 	struct vtbounce_softc *sc;
 	int error;
@@ -287,7 +291,7 @@ virtio_bounce_mmap_single(struct cdev *cdev, vm_ooffset_t *offset,
 		return (EINVAL);
 
 	vm_object_reference(sc->vtb_object);
-	*objp = &sc->vtb_object;
+	*objp = sc->vtb_object;
 
 	return (0);
 }
@@ -355,11 +359,10 @@ virtio_bounce_ack(struct vtbounce_softc *sc)
 
 
 static int
-virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr data, int fflag, struct thread *td)
+virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, struct thread *td)
 {
 	struct vtbounce_softc *sc;
 	int ret = 0;
-	int error;
 
 	ret = devfs_get_cdevpriv((void **)&sc);
 	if (ret != 0)
@@ -370,7 +373,7 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr data, int fflag, struct
 		ret = virtio_bounce_init();
 		break;
 	case VIRTIO_BOUNCE_FINI:
-		virtio_bounce_fini();
+		virtio_bounce_fini(sc);
 		break;
 	case VIRTIO_BOUNCE_KICK:
 		virtio_bounce_kick(sc);
@@ -447,7 +450,7 @@ static struct cdevsw virtio_bounce_cdevsw = {
 };
 
 static int
-virtio_bounce_init(void)
+virtio_bounce_dev_init(void)
 {
 	bouncedev = make_dev(&virtio_bounce_cdevsw, 0, UID_ROOT, GID_OPERATOR,
 	    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, "virtio_bounce");
@@ -458,7 +461,7 @@ virtio_bounce_init(void)
 }
 
 static void
-virtio_bounce_destroy(void)
+virtio_bounce_dev_destroy(void)
 {
 	MPASS(bouncedev != NULL);
 	destroy_dev(bouncedev);
@@ -471,10 +474,10 @@ virtio_bounce_loader(struct module *m, int what, void *arg)
 
 	switch (what) {
 	case MOD_LOAD:
-		err = virtio_bounce_init();
+		err = virtio_bounce_dev_init();
 		break;
 	case MOD_UNLOAD:
-		virtio_bounce_destroy();
+		virtio_bounce_dev_destroy();
 		break;
 	default:
 		return (EINVAL);
