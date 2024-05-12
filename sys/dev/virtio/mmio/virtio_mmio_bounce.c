@@ -43,14 +43,45 @@
 
 #define VTBOUNCE_PLATFORM (0x0badcafe)
 
-struct vtbounce_softc {
-	struct vtmmio_softc sc;
-	struct kthread *td;
-	struct waitchannel *wc;
-};
-/**/
+/* XXX Make this a sysctl. */
+#define VTBOUNCE_MAPSZ (1024 * 1024 * 10)
 
-#define VTMMIO_SOFTC(sc) (sc.sc)
+/*
+ * Information on a bounce character device instance.
+ */
+struct vtbounce_softc {
+	struct mtx		vtb_mtx;
+	struct knlist		vtb_note;
+
+	vm_object_t		vtb_object;
+	vm_ooffset_t		vtb_baseaddr;
+	size_t			vtb_bytes;
+
+	virtqueue_intr_t	*vtb_intr;
+	void			*vtb_intr_arg;
+
+	vm_ooffset_t		vtb_offset;
+
+	device_t		vtb_dev;
+};
+
+/*
+ * Subclass of vtmmio_softc that also lets the virtio device access
+ * the character device's bounce buffer - related information.
+ */
+struct vtmmio_bounce_softc {
+	struct vtmmio_softc	vtmb_mmio;
+	struct vtbounce_softc	*vtmb_bounce;
+};
+
+static struct vtbounce_softc *
+vtmmio_get_vtb(device_t dev)
+{
+	struct vtmmio_bounce_softc *sc;
+
+	sc = device_get_softc(dev);
+	return (sc->vtmb_bounce);
+}
 
 static int
 vtmmio_bounce_probe(device_t dev)
@@ -59,35 +90,54 @@ vtmmio_bounce_probe(device_t dev)
 	return (EINVAL);
 }
 
-/*
- * We create a fake platform to trigger virtio_mmio_note() calls.
- */
 static int
 vtmmio_bounce_attach(device_t dev)
 {
 	struct vtmmio_softc *sc;
 
 	sc = device_get_softc(dev);
+	/* Fake platform to trigger virtio_mmio_note() on writes. */
 	sc->platform = VTBOUNCE_PLATFORM;
 
 	return (vtmmio_attach(dev));
 }
 
-/* XXX Use this to notify userspace after we write, and possibly wait for it. */
+/* Notify userspace of a write, and wait for a response. */
 static int
 vtmmio_bounce_note(device_t dev, size_t offset, int val)
 {
-	/* XXX Grab the softc, extract the fd. */
-	/* XXX Write on the control block. */
-	/* XXX Deliver a kqueue event to it. */
-	/* XXX Wait on a per-softc for the user to write back. */
+	struct vtbounce_softc *sc;
+
+	sc = vtmmio_get_vtb(dev);
+
+	mtx_lock(&sc->vtb_mtx);
+	sc->vtb_offset = offset;
+	KNOTE_LOCKED(&sc->vtb_rsel, PRIBIO);
+
+	msleep(sc, &sc->sc_mtx, PRIBIO, "vtmmionote", 0);
+
+	mtx_unlock(&sc->vtb_mtx);
+
+
 	return (1);
 }
 
+/* 
+ * Pass interrupt information to the cdev. The cdev will be directly
+ * running the device interrupt handling code as an ioctl.
+ */
 static int
 vtmmio_bounce_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *ih_user)
 {
-	/* XXX Pass the handler function to the kernel thread. */
+	struct vtbounce_softc *sc;
+
+	sc = vtmmio_get_vtb(dev);
+
+	mtx_lock(&sc->vtb_mtx);
+	sc->vtb_intr = handler;
+	sc->vtb_intr_arg = ih_user;
+	mtx_unlock(&sc->vtb_mtx);
+
 	return (0);
 }
 
@@ -109,12 +159,15 @@ DRIVER_MODULE(vtmmio_bounce, nexus, vtmmio_bounce_driver, 0, 0);
 struct cdev *bouncedev;
 
 /*
+ * Create and map the device memory into the kernel.
+ *
  * The mapping/wiring logic is taken from kern/link_elf_obj.c
  */ 
 static int
-virtio_bounce_map_kernel(vm_object_t obj, vm_offset_t *baseaddrp)
+virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 {
-	size_t sz = IDX_TO_OFF(obj->size);
+	size_t bytes = IDX_TO_OFF(obj->size);
+	vm_object_t obj = sc->vtb_obj;
 	vm_offset_t baseaddr;
 	int error;
 
@@ -124,63 +177,76 @@ virtio_bounce_map_kernel(vm_object_t obj, vm_offset_t *baseaddrp)
 	baseaddr = VM_MIN_KERNEL_ADDRESS;
 #endif
 
-	error = vm_map_find(kernel_map, obj, 0, &baseaddr, round_page(sz),
-			0, VMFS_OPTIMAL_SPACE, VM_PROT_ALL, VM_PROT_ALL, 0);
+	vm_object_reference(obj);
+
+	error = vm_map_find(kernel_map, obj, 0, &baseaddr, bytes, 0,
+		VMFS_OPTIMAL_SPACE, VM_PROT_ALL, VM_PROT_ALL, 0);
 	if (error != KERN_SUCCESS) {
 		vm_object_deallocate(obj);
 		return (ENOMEM);
 	}
 
-	/* Wire the pages */
-	error = vm_map_wire(kernel_map, baseaddr, baseaddr + sz,
+	error = vm_map_wire(kernel_map, baseaddr, baseaddr + bytes,
 	    VM_MAP_WIRE_SYSTEM|VM_MAP_WIRE_NOHOLES);
 	if (error != KERN_SUCCESS) {
-		vm_map_remove(baseaddr, baseaddr + sz);
+		vm_map_remove(baseaddr, baseaddr + bytes);
 		return (ENOMEM);
 	}
 
-	*baseaddrp = baseaddr;
+	sc->vtb_baseaddr = baseaddr;
+	sc->vtb_bytes = bytes;
 
 	return (0);
 }
 
-/* XXX Make this a sysctl. */
-#define MAPPING_SIZE (1024 * 1024 * 10)
-
 void
 virtio_bounce_dtor(void *arg)
 {
-	vm_offset_t baseaddr = (vm_offset_t) arg;
-	vm_map_entry_t entry;
+	struct virtio_bounce *sc = (struct virtio_bounce *)arg;
 
-	vm_map_lookup_entry(kernel_map, baseaddr, &entry);
-	MPASS(entry->start == baseaddr);
+	if (sc->vtb_dev != 0)
+		VTMMIO_DETACH(sc->vtb_dev);
 
-	vm_map_delete(entry->start, entry->end);
+	if (sc->vtb_baseaddr != 0)
+		vm_map_delete(sc->vtb_baseaddr, sc->vtb_baseaddr + sc->vtb_bytes);
+
+	vm_object_deallocate(sc->vtb_object);
+
+	knlist_delete(&sc->vtb_note, curthread, 0);
+	knlist_destroy(&sc->vtb_note);
+	mtx_destroy(&sc->vtb_mtx);
 }
 
 static int
-virtio_bounce_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
+virtio_bounce_open(struct cdev *cdev, int oflags, int devtype, struct thread *td)
 {
-	size_t sz = round_page(MAPPING_SIZE);
-	vm_offset_t baseaddr;
-	vm_object_t obj;
+	size_t sz = round_page(VTBOUNCE_MAPSZ);
+	struct vtbounce_softc *sc;
 	int error;
 
-	obj = vm_pager_allocate(OBJT_PHYS, NULL, sz, VM_PROT_ALL,
-			0, thread0.td_ucred);
-	if (obj == NULL)
+	sc = malloc(sizeof(struct vtbounce_softc), M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (sc == NULL)
 		return (ENOMEM);
 
-	error = virtio_bounce_map_kernel(obj, &baseaddr);
+	mtx_init(sc->vtb_mtx);
+	knlist_init_mtx(&sc->vtb_note, &sc->vtb_mtx);
+				
+	sc->vtb_obj = vm_pager_allocate(OBJT_PHYS, NULL, sz, VM_PROT_ALL,
+			0, thread0.td_ucred);
+	if (sc->vtb_obj == NULL) {
+		virtio_bounce_dtor(sc);
+		return (ENOMEM);
+	}
+
+	error = virtio_bounce_map_kernel(sc);
 	if (error != 0) {
-		vm_object_deallocate(obj);
+		virtio_bounce_dtor(sc);
 		return (error);
 	}
 
-	error = devfs_set_cdevpriv((void *)baseaddr, virtio_bounce_dtor);
+	error = devfs_set_cdevpriv((void *)sc, virtio_bounce_dtor);
 	if (error != 0)
-		virtio_bounce_dtor((void *) kernmapping);
+		virtio_bounce_dtor(sc);
 
 	return (error);
 }
@@ -189,33 +255,28 @@ static int
 virtio_bounce_mmap_single(struct cdev *cdev, vm_ooffset_t *offset, vm_size_t size,
 		struct vm_object_t **objp, int nprot)
 {
-	vm_map_entry_t entry;
-	vm_offset_t baseaddr;
-	size_t maxsize;
-	vm_object_t obj;
+	struct vtbounce_softc *sc;
 	int error;
 
-	error = devfs_get_cdevpriv(&baseaddr);
+	error = devfs_get_cdevpriv(&sc);
 	if (error != 0)
 		return (error);
 
-	vm_map_lookup_entry(kernel_map, baseaddr, &entry);
-	MPASS(entry->start == baseaddr);
-
-	obj = entry->vm_object.object;
-	maxsize = IDX_TO_OFF(obj->size);
-
-	if (*offset + size > maxsize)
+	if (*offset + size > sc->vtb_bytes)
 		return (EINVAL);
 
-	vm_object_reference(obj);
-	*objp = obj;
+	vm_object_reference(sc->vtb_obj);
+	*objp = sc->vtb_obj;
+
 	return (0);
 }
 
+/* Create the virtio device. */
 static int
-virtio_bounce_initialize(void)
+virtio_bounce_init(void)
 {
+	struct vtbounce_softc *vtbsc;
+	struct vtmmio_bounce_softc *mmiosc;
 	unsigned long baseaddr;
 	vm_map_entry_t entry;
 	vm_offset_t baseaddr;
@@ -227,33 +288,40 @@ virtio_bounce_initialize(void)
 	/* XXX Prevent initializing the same device twice. */
 
 	/* Retrieve the mapping address/size. */
-	error = devfs_get_cdevpriv(&baseaddr);
+	error = devfs_get_cdevpriv(vtbsc);
 	if (error != 0)
 		return (error);
 
-	vm_map_lookup_entry(kernel_map, baseaddr, &entry);
-	MPASS(entry->start == baseaddr);
-
-	obj = entry->vm_object.object;
-	sz = round_page(obj->size);
-
 	/* Create the child and assign its resources. */
 	child = BUS_ADD_CHILD(vtmmio_bounce_driver, 0, vtmmio_bounce_driver->name, -1);
-	bus_set_resource(child, SYS_RES_MEMORY, 0, baseaddr, sz);
+	bus_set_resource(child, SYS_RES_MEMORY, 0, vtbsc->vtb_baseaddr,
+			vtbsc->vtb_bytes);
 	device_set_driver(child, vtmmio_bounce_driver);
+
+	/* Have the device and cdev be able to refer to each other. */
+	mmiosc = device_get_softc(dev);
+	mmiosc->vtmb_bounce = vtbsc;
+	vtbsc->vtb_dev = child;
 
 	return (0);
 }
+
+/* Destroy the virtio device. */
+static void
+virtio_bounce_fini(struct vtbounce_softc *sc)
+{
+	panic("unimplemented");
+}
+
 
 /* 
  * Instead of triggering an interrupt to handle 
  * the virtqueue operation, we do it ourselves.
  */
 static void
-virtio_bounce_kick(void)
+virtio_bounce_kick(struct vtbounce_softc *sc)
 {
-	/* XXX Access the interrupt handling function and argument and run it. */
-	panic("unimplemented");
+	sc->vtb_intr(sc->vtb_intr_arg);
 }
 
 /*
@@ -262,33 +330,41 @@ virtio_bounce_kick(void)
  * emulated, at which point a userspace thread will allow it to resume.
  */
 static void
-virtio_bounce_resume(void)
+virtio_bounce_ack(struct vtbounce_softc *sc)
 {
-	/* XXX Find the waitchannel for the device. */
-	/* XXX Notify the waitchannel to allow any executing thread to resume. */
-	panic("unimplemented");
+	mtx_lock(&sc->sc_mtx);
+	wakeup(sc);
+	mtx_unlock(&sc->sc_mtx);
 }
 
+
 static int
-virtio_bounce_ioctl(struct cdev *dev, u_long cmd, caddr_data, int fflag, struct thread *td)
+virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_data, int fflag, struct thread *td)
 {
+	struct vtbounce_softc *sc;
+	int ret = 0;
+	int error;
+
+	ret = devfs_get_cdevpriv(&sc);
+	if (ret != 0)
+		return (ret);
+
 	switch (cmd) {
 	case VIRTIO_BOUNCE_INIT:
-		virtio_bounce_initialize();
+		ret = virtio_bounce_init();
 		break;
-	case VIRTIO_BOUNCE_STOP:
-		/* Stop and detach the device. */
-		panic("Unimplemented");
+	case VIRTIO_BOUNCE_FINI:
+		virtio_bounce_stop();
 		break;
 	case VIRTIO_BOUNCE_KICK:
 		virtio_bounce_kick();
 		break;
-	case VIRTIO_BOUNCE_RESUME:
-		virtio_bounce_resume();
+	case VIRTIO_BOUNCE_ACK:
+		virtio_bounce_ack();
 		break;
 	}
 
-	return (0);
+	return (ret);
 }
 
 static void
@@ -301,17 +377,20 @@ fuse_device_filt_detach(struct knote *kn)
 static int
 virtio_bounce_filt_read(struct knote *kn, long hint)
 {
+	struct vtbounce_softc *sc;
 
-	/* 
-	 * XXX Only return success if there has been a write
-	 * from the driver. If so, retrieve the address it
-	 * happened in and add it to kn_data.
-	 */
+	sc = (struct vtbounce_softc *)kn->kn_hook;
+	mtx_lock(&sc->sc_mtx);
+	if (sc->sc_offset == 0) {
+		mtx_unlock(&sc->sc_mtx);
+		return (0);
+	}
+
+	kn->kn_data = sc->vtb_offset;
+	sc->vtb_offset = 0;
+
+	mtx_unlock(&sc->sc_mtx);
 	
-
-	/* XXX Return the address of the write to the user. */
-	kn->kn_data = 0;
-
 	return (1);
 }
 
@@ -324,17 +403,22 @@ struct filterops fuse_device_rfiltops = {
 static int
 virtio_bounce_filter(struct cdev *dev, struct knote *kn)
 {
+	struct vtbounce_softc *sc;
+	int error;
+
+	error = devfs_get_cdevpriv(&sc);
+	if (error != 0)
+		return (error);
+
 	if (kn->kn_filter != EVFILT_READ) {
 		kn->kn_data = EINVAL;
 		return (EINVAL);
 	}
 
 	kn->kn_fop = &virtio_bounce_rfiltops;
-	/* 
-	 * XXX Pass a data structure that allows the filter to
-	 * eventually retrieve the address that was written.
-	 */
-	kn->kn_hook = NULL;
+	kn->kn_hook = sc;
+
+	return (0);
 
 }
 
