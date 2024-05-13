@@ -53,50 +53,61 @@ struct mmio_devemu {
 };
 #define MMIO_EMUL_SET(x)   DATA_SET(mmio_devemu_set, x)
 
+enum mmio_devstate {
+	MIDEV_INVALID,
+	MIDEV_ACKNOWLEDGED,
+	MIDEV_DRIVER_FOUND,
+	MIDEV_FEATURES_OK,
+	MIDEV_LIVE,
+	MIDEV_FAILED,
+	MIDEV_DEVICE_STATES,
+};
+
 struct mmio_devinst {
-	struct mmio_devemu *mi_d;
-	char	  mi_name[PI_NAMESZ];
-	int	  pi_prevcap;
-	int	  pi_capend;
+	struct mmio_devemu 	*mi_d;
+	char	  		mi_name[PATH_MAX];	/* XXX Change to make more general */
+	char 	  		*mi_mmio;	/* Memory mapped region */
+	size_t	  		mi_size;	/* Size of region in bytes */
+	void 	  		mi_fd;		/* File descriptor for the region. */
+	enum mmio_devstate;	mi_state;	
 
 	void      *mi_arg;		/* devemu-private data */
 };
 
-/* XXX Change these to MMIO reads. */
 static __inline void
-pci_set_cfgdata8(struct pci_devinst *pi, int offset, uint8_t val)
+mmio_set_cfgdata8(struct mmio_devinst *mi, int offset, uint8_t val)
 {
-	*(uint8_t *)(pi->pi_cfgdata + offset) = val;
+	*(uint8_t *)(mi->mi_mmio + offset) = val;
 }
 
 static __inline void
-pci_set_cfgdata16(struct pci_devinst *pi, int offset, uint16_t val)
+mmio_set_cfgdata16(struct mmio_devinst *mi, int offset, uint16_t val)
 {
-	*(uint16_t *)(pi->pi_cfgdata + offset) = val;
+	*(uint16_t *)(mi->mi_mmio + offset) = htole16(val);
 }
 
 static __inline void
-pci_set_cfgdata32(struct pci_devinst *pi, int offset, uint32_t val)
+mmio_set_cfgdata32(struct mmio_devinst *mi, int offset, uint32_t val)
 {
-	*(uint32_t *)(pi->pi_cfgdata + offset) = val;
+	*(uint32_t *)(mi->mi_mmio + offset) = htole32(val);
 }
 
 static __inline uint8_t
-pci_get_cfgdata8(struct pci_devinst *pi, int offset)
+mmio_get_cfgdata8(struct mmio_devinst *mi, int offset)
 {
-	return (*(uint8_t *)(pi->pi_cfgdata + offset));
+	return (*(uint8_t *)(mi->mi_mmio + offset));
 }
 
 static __inline uint16_t
-pci_get_cfgdata16(struct pci_devinst *pi, int offset)
+mmio_get_cfgdata16(struct mmio_devinst *mi, int offset)
 {
-	return (*(uint16_t *)(pi->pi_cfgdata + offset));
+	return letoh16((*(uint16_t *)(mi->mi_mmio + offset)));
 }
 
 static __inline uint32_t
-pci_get_cfgdata32(struct pci_devinst *pi, int offset)
+mmio_get_cfgdata32(struct mmio_devinst *mi, int offset)
 {
-	return (*(uint32_t *)(pi->pi_cfgdata + offset));
+	return letoh16((*(uint32_t *)(mi->mi_mmio + offset)));
 }
 
 #endif /* _MMIO_EMUL_H_ */

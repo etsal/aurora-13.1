@@ -161,9 +161,9 @@ static int mmio_vtblk_debug;
 #define	DPRINTF(params) if (mmio_vtblk_debug) PRINTLN params
 #define	WPRINTF(params) PRINTLN params
 
-struct pci_vtblk_ioreq {
+struct mmio_vtblk_ioreq {
 	struct blockif_req		io_req;
-	struct pci_vtblk_softc		*io_sc;
+	struct mmio_vtblk_softc		*io_sc;
 	uint8_t				*io_status;
 	uint16_t			io_idx;
 };
@@ -188,49 +188,39 @@ struct mmio_vtblk_softc {
 	struct virtio_consts vbsc_consts;
 	struct blockif_ctxt *bc;
 	char vbsc_ident[VTBLK_BLK_ID_BYTES];
-	struct pci_vtblk_ioreq vbsc_ios[VTBLK_RINGSZ];
+	struct mmio_vtblk_ioreq vbsc_ios[VTBLK_RINGSZ];
 };
 
-static void pci_vtblk_reset(void *);
-static void pci_vtblk_notify(void *, struct vqueue_info *);
-static int pci_vtblk_cfgread(void *, int, int, uint32_t *);
-static int pci_vtblk_cfgwrite(void *, int, int, uint32_t);
-#ifdef BHYVE_SNAPSHOT
-static void pci_vtblk_pause(void *);
-static void pci_vtblk_resume(void *);
-static int pci_vtblk_snapshot(void *, struct vm_snapshot_meta *);
-#endif
+static void mmio_vtblk_reset(void *);
+static void mmio_vtblk_notify(void *, struct vqueue_info *);
+static int mmio_vtblk_cfgread(void *, int, int, uint32_t *);
+static int mmio_vtblk_cfgwrite(void *, int, int, uint32_t);
 
 static struct virtio_consts vtblk_vi_consts = {
 	.vc_name =	"vtblk",
 	.vc_nvq =	1,
 	.vc_cfgsize =	sizeof(struct vtblk_config),
-	.vc_reset =	pci_vtblk_reset,
-	.vc_qnotify =	pci_vtblk_notify,
-	.vc_cfgread =	pci_vtblk_cfgread,
-	.vc_cfgwrite =	pci_vtblk_cfgwrite,
+	.vc_reset =	mmio_vtblk_reset,
+	.vc_qnotify =	mmio_vtblk_notify,
+	.vc_cfgread =	mmio_vtblk_cfgread,
+	.vc_cfgwrite =	mmio_vtblk_cfgwrite,
 	.vc_apply_features = NULL,
 	.vc_hv_caps =	VTBLK_S_HOSTCAPS,
-#ifdef BHYVE_SNAPSHOT
-	.vc_pause =	pci_vtblk_pause,
-	.vc_resume =	pci_vtblk_resume,
-	.vc_snapshot =	pci_vtblk_snapshot,
-#endif
 };
 
 static void
-pci_vtblk_reset(void *vsc)
+mmio_vtblk_reset(void *vsc)
 {
-	struct pci_vtblk_softc *sc = vsc;
+	struct mmio_vtblk_softc *sc = vsc;
 
 	DPRINTF(("vtblk: device reset requested !"));
 	vi_reset_dev(&sc->vbsc_vs);
 }
 
 static void
-pci_vtblk_done_locked(struct pci_vtblk_ioreq *io, int err)
+mmio_vtblk_done_locked(struct mmio_vtblk_ioreq *io, int err)
 {
-	struct pci_vtblk_softc *sc = io->io_sc;
+	struct mmio_vtblk_softc *sc = io->io_sc;
 
 	/* convert errno into a virtio block error return */
 	if (err == EOPNOTSUPP || err == ENOSYS)
@@ -248,56 +238,22 @@ pci_vtblk_done_locked(struct pci_vtblk_ioreq *io, int err)
 	vq_endchains(&sc->vbsc_vq, 0);
 }
 
-#ifdef BHYVE_SNAPSHOT
 static void
-pci_vtblk_pause(void *vsc)
+mmio_vtblk_done(struct blockif_req *br, int err)
 {
-	struct pci_vtblk_softc *sc = vsc;
-
-	DPRINTF(("vtblk: device pause requested !\n"));
-	blockif_pause(sc->bc);
-}
-
-static void
-pci_vtblk_resume(void *vsc)
-{
-	struct pci_vtblk_softc *sc = vsc;
-
-	DPRINTF(("vtblk: device resume requested !\n"));
-	blockif_resume(sc->bc);
-}
-
-static int
-pci_vtblk_snapshot(void *vsc, struct vm_snapshot_meta *meta)
-{
-	int ret;
-	struct pci_vtblk_softc *sc = vsc;
-
-	SNAPSHOT_VAR_OR_LEAVE(sc->vbsc_cfg, meta, ret, done);
-	SNAPSHOT_BUF_OR_LEAVE(sc->vbsc_ident, sizeof(sc->vbsc_ident),
-			      meta, ret, done);
-
-done:
-	return (ret);
-}
-#endif
-
-static void
-pci_vtblk_done(struct blockif_req *br, int err)
-{
-	struct pci_vtblk_ioreq *io = br->br_param;
-	struct pci_vtblk_softc *sc = io->io_sc;
+	struct mmio_vtblk_ioreq *io = br->br_param;
+	struct mmio_vtblk_softc *sc = io->io_sc;
 
 	pthread_mutex_lock(&sc->vsc_mtx);
-	pci_vtblk_done_locked(io, err);
+	mmio_vtblk_done_locked(io, err);
 	pthread_mutex_unlock(&sc->vsc_mtx);
 }
 
 static void
-pci_vtblk_proc(struct pci_vtblk_softc *sc, struct vqueue_info *vq)
+mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 {
 	struct virtio_blk_hdr *vbh;
-	struct pci_vtblk_ioreq *io;
+	struct mmio_vtblk_ioreq *io;
 	int i, n;
 	int err;
 	ssize_t iolen;
@@ -369,7 +325,7 @@ pci_vtblk_proc(struct pci_vtblk_softc *sc, struct vqueue_info *vq)
 		 * requirements, we return a error.
 		 */
 		if (iov[1].iov_len != sizeof (*discard)) {
-			pci_vtblk_done_locked(io, EINVAL);
+			mmio_vtblk_done_locked(io, EINVAL);
 			return;
 		}
 
@@ -388,13 +344,13 @@ pci_vtblk_proc(struct pci_vtblk_softc *sc, struct vqueue_info *vq)
 		 * Currently there are no known flags for a DISCARD request.
 		 */
 		if (discard->flags.unmap != 0 || discard->flags.reserved != 0) {
-			pci_vtblk_done_locked(io, ENOTSUP);
+			mmio_vtblk_done_locked(io, ENOTSUP);
 			return;
 		}
 
 		/* Make sure the request doesn't exceed our size limit */
 		if (discard->num_sectors > VTBLK_MAX_DISCARD_SECT) {
-			pci_vtblk_done_locked(io, EINVAL);
+			mmio_vtblk_done_locked(io, EINVAL);
 			return;
 		}
 
@@ -412,61 +368,58 @@ pci_vtblk_proc(struct pci_vtblk_softc *sc, struct vqueue_info *vq)
 		memset(iov[1].iov_base, 0, iov[1].iov_len);
 		strncpy(iov[1].iov_base, sc->vbsc_ident,
 		    MIN(iov[1].iov_len, sizeof(sc->vbsc_ident)));
-		pci_vtblk_done_locked(io, 0);
+		mmio_vtblk_done_locked(io, 0);
 		return;
 	default:
-		pci_vtblk_done_locked(io, EOPNOTSUPP);
+		mmio_vtblk_done_locked(io, EOPNOTSUPP);
 		return;
 	}
 	assert(err == 0);
 }
 
 static void
-pci_vtblk_notify(void *vsc, struct vqueue_info *vq)
+mmio_vtblk_notify(void *vsc, struct vqueue_info *vq)
 {
-	struct pci_vtblk_softc *sc = vsc;
+	struct mmio_vtblk_softc *sc = vsc;
 
 	while (vq_has_descs(vq))
-		pci_vtblk_proc(sc, vq);
+		mmio_vtblk_proc(sc, vq);
 }
 
 static void
-pci_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
+mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
     size_t new_size)
 {
-	struct pci_vtblk_softc *sc;
+	struct mmio_vtblk_softc *sc;
 
 	sc = arg;
 
 	sc->vbsc_cfg.vbc_capacity = new_size / VTBLK_BSIZE; /* 512-byte units */
-	vi_interrupt(&sc->vbsc_vs, VIRTIO_PCI_ISR_CONFIG,
-	    sc->vbsc_vs.vs_msix_cfg_idx);
+	/* XXX Handle resizing. */
+	printf("UNIMPLEMENTED RESIZE\n");
+	exit(1);
 }
 
 static int
-pci_vtblk_init(struct pci_devinst *pi, nvlist_t *nvl)
+mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
 {
-	char bident[sizeof("XXX:XXX")];
+	char bident[PATH_MAX];
 	struct blockif_ctxt *bctxt;
 	const char *path, *serial;
 	MD5_CTX mdctx;
 	u_char digest[16];
-	struct pci_vtblk_softc *sc;
+	struct mmio_vtblk_softc *sc;
 	off_t size;
 	int i, sectsz, sts, sto;
 
 	/*
 	 * The supplied backing file has to exist
 	 */
-	snprintf(bident, sizeof(bident), "%u:%u", pi->pi_slot, pi->pi_func);
+	/* XXX Add a human readable name, or in general some other identifier. */
+	snprintf(bident, sizeof(bident), "%s", mi->mi_name);
 	bctxt = blockif_open(nvl, bident);
 	if (bctxt == NULL) {
 		perror("Could not open backing file");
-		return (1);
-	}
-
-	if (blockif_add_boot_device(pi, bctxt)) {
-		perror("Invalid boot device");
 		return (1);
 	}
 
@@ -474,11 +427,11 @@ pci_vtblk_init(struct pci_devinst *pi, nvlist_t *nvl)
 	sectsz = blockif_sectsz(bctxt);
 	blockif_psectsz(bctxt, &sts, &sto);
 
-	sc = calloc(1, sizeof(struct pci_vtblk_softc));
+	sc = calloc(1, sizeof(struct mmio_vtblk_softc));
 	sc->bc = bctxt;
 	for (i = 0; i < VTBLK_RINGSZ; i++) {
-		struct pci_vtblk_ioreq *io = &sc->vbsc_ios[i];
-		io->io_req.br_callback = pci_vtblk_done;
+		struct mmio_vtblk_ioreq *io = &sc->vbsc_ios[i];
+		io->io_req.br_callback = mmio_vtblk_done;
 		io->io_req.br_param = io;
 		io->io_sc = sc;
 		io->io_idx = i;
@@ -491,7 +444,7 @@ pci_vtblk_init(struct pci_devinst *pi, nvlist_t *nvl)
 	pthread_mutex_init(&sc->vsc_mtx, NULL);
 
 	/* init virtio softc and virtqueues */
-	vi_softc_linkup(&sc->vbsc_vs, &sc->vbsc_consts, sc, pi, &sc->vbsc_vq);
+	vi_softc_linkup(&sc->vbsc_vs, &sc->vbsc_consts, sc, mi, &sc->vbsc_vq);
 	sc->vbsc_vs.vs_mtx = &sc->vsc_mtx;
 
 	sc->vbsc_vq.vq_qsize = VTBLK_RINGSZ;
@@ -543,29 +496,25 @@ pci_vtblk_init(struct pci_devinst *pi, nvlist_t *nvl)
 	sc->vbsc_cfg.max_discard_seg = VTBLK_MAX_DISCARD_SEG;
 	sc->vbsc_cfg.discard_sector_alignment = MAX(sectsz, sts) / VTBLK_BSIZE;
 
-	/*
-	 * Should we move some of this into virtio.c?  Could
-	 * have the device, class, and subdev_0 as fields in
-	 * the virtio constants structure.
-	 */
-	pci_set_cfgdata16(pi, PCIR_DEVICE, VIRTIO_DEV_BLOCK);
-	pci_set_cfgdata16(pi, PCIR_VENDOR, VIRTIO_VENDOR);
-	pci_set_cfgdata8(pi, PCIR_CLASS, PCIC_STORAGE);
-	pci_set_cfgdata16(pi, PCIR_SUBDEV_0, VIRTIO_ID_BLOCK);
-	pci_set_cfgdata16(pi, PCIR_SUBVEND_0, VIRTIO_VENDOR);
+	/* XXX Make sure we do not need to set up anything else*/
+	mmio_set_cfgdata32(mi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
+	mmio_set_cfgdata32(mi, VIRTIO_MMIO_VERSION, 0x2);
+	mmio_set_cfgdata32(mi, VIRTIO_MMIO_DEVICE_ID, VIRTIO_DEV_BLOCK);
+	mmio_set_cfgdata(mi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
 
+	/* XXX Decide what we do with this. */
 	if (vi_intr_init(&sc->vbsc_vs, 1, fbsdrun_virtio_msix())) {
 		blockif_close(sc->bc);
 		free(sc);
 		return (1);
 	}
 	vi_set_io_bar(&sc->vbsc_vs, 0);
-	blockif_register_resize_callback(sc->bc, pci_vtblk_resized, sc);
+	blockif_register_resize_callback(sc->bc, _vtblk_resized, sc);
 	return (0);
 }
 
 static int
-pci_vtblk_cfgwrite(void *vsc __unused, int offset, int size __unused,
+mmio_vtblk_cfgwrite(void *vsc __unused, int offset, int size __unused,
     uint32_t value __unused)
 {
 
@@ -574,9 +523,9 @@ pci_vtblk_cfgwrite(void *vsc __unused, int offset, int size __unused,
 }
 
 static int
-pci_vtblk_cfgread(void *vsc, int offset, int size, uint32_t *retval)
+mmio_vtblk_cfgread(void *vsc, int offset, int size, uint32_t *retval)
 {
-	struct pci_vtblk_softc *sc = vsc;
+	struct mmio_vtblk_softc *sc = vsc;
 	void *ptr;
 
 	/* our caller has already verified offset and size */
@@ -585,11 +534,12 @@ pci_vtblk_cfgread(void *vsc, int offset, int size, uint32_t *retval)
 	return (0);
 }
 
-static const struct pci_devemu pci_de_vblk = {
+
+static const struct mmio_devemu mmio_de_vblk = {
 	.pe_emu =	"virtio-blk",
-	.pe_init =	pci_vtblk_init,
+	.pe_init =	mmio_vtblk_init,
 	.pe_legacy_config = blockif_legacy_config,
-	.pe_barwrite =	vi_pci_write,
-	.pe_barread =	vi_pci_read,
+	.pe_barwrite =	vi_mmio_write,
+	.pe_barread =	vi_mmio_read,
 };
-PCI_EMUL_SET(pci_de_vblk);
+MMIO_EMUL_SET(mmio_de_vblk);

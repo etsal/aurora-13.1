@@ -195,6 +195,7 @@ vring_size_aligned(u_int qsz)
 
 struct vqueue_info;
 
+/* XXX Clean this up further as we go. */
 struct virtio_softc {
 	struct virtio_consts *vs_vc;	/* constants (see below) */
 	int	vs_flags;		/* VIRTIO_* flags from above */
@@ -358,11 +359,10 @@ struct vi_req {
 
 /* XXX These four functions must be adapted for the virtio transport. */
 void	vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
-			void *dev_softc, struct pci_devinst *pi,
+			void *dev_softc, struct mmio_devinst *mi,
 			struct vqueue_info *queues);
 int	vi_intr_init(struct virtio_softc *vs, int barnum, int use_msix);
 void	vi_reset_dev(struct virtio_softc *);
-void	vi_set_io_bar(struct virtio_softc *, int);
 
 int	vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 	    struct vi_req *reqp);
@@ -373,9 +373,7 @@ void	vq_relchain_publish(struct vqueue_info *vq);
 void	vq_relchain(struct vqueue_info *vq, uint16_t idx, uint32_t iolen);
 void	vq_endchains(struct vqueue_info *vq, int used_all_avail);
 
-/* XXX Adapt for the virtio transport. */
-uint64_t vi_mmio_read(struct pci_devinst *pi, int baridx, uint64_t offset,
-	    int size);
-void	vi_mmio_write(struct pci_devinst *pi, int baridx, uint64_t offset,
-	    int size, uint64_t value);
+uint64_t vi_mmio_read(struct mmio_devinst *mi, uint64_t offset, int size);
+void	vi_mmio_write(struct mmio_devinst *mi, uint64_t offset, int size,
+	uint64_t value);
 #endif	/* _BHYVE_VIRTIO_H_ */

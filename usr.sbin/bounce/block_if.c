@@ -55,7 +55,6 @@
 #include <machine/atomic.h>
 #include <machine/vmm_snapshot.h>
 
-#include "bhyverun.h"
 #include "config.h"
 #include "debug.h"
 #include "mevent.h"
@@ -997,35 +996,3 @@ blockif_candelete(struct blockif_ctxt *bc)
 	assert(bc->bc_magic == BLOCKIF_SIG);
 	return (bc->bc_candelete);
 }
-
-#ifdef BHYVE_SNAPSHOT
-void
-blockif_pause(struct blockif_ctxt *bc)
-{
-	assert(bc != NULL);
-	assert(bc->bc_magic == BLOCKIF_SIG);
-
-	pthread_mutex_lock(&bc->bc_mtx);
-	bc->bc_paused = 1;
-
-	/* The interface is paused. Wait for workers to finish their work */
-	while (!blockif_empty(bc))
-		pthread_cond_wait(&bc->bc_work_done_cond, &bc->bc_mtx);
-	pthread_mutex_unlock(&bc->bc_mtx);
-
-	if (!bc->bc_rdonly && blockif_flush_bc(bc))
-		EPRINTLN("%s: [WARN] failed to flush backing file.",
-			__func__);
-}
-
-void
-blockif_resume(struct blockif_ctxt *bc)
-{
-	assert(bc != NULL);
-	assert(bc->bc_magic == BLOCKIF_SIG);
-
-	pthread_mutex_lock(&bc->bc_mtx);
-	bc->bc_paused = 0;
-	pthread_mutex_unlock(&bc->bc_mtx);
-}
-#endif	/* BHYVE_SNAPSHOT */

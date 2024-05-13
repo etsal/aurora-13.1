@@ -50,12 +50,13 @@
  * front of virtio-based device softc" constraint, let's use
  * this to convert.
  */
-#define	DEV_SOFTC(vs) ((void *)(vs))
+#define	MIDEV_SOFTC(vs) ((void *)(vs))
 
 /*
  * Link a virtio_softc to its constants, the device softc, and
  * the PCI emulation.
  */
+/* XXX Make sure this is correct. */
 void
 vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 		void *dev_softc, struct mmio_devinst *mi,
@@ -79,6 +80,7 @@ vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 void
 vi_reset_dev(struct virtio_softc *vs)
 {
+	struct mmio_devinst *mi = vs->vs_mi;
 	struct vqueue_info *vq;
 	int i, nvq;
 
@@ -95,6 +97,11 @@ vi_reset_dev(struct virtio_softc *vs)
 	}
 	vs->vs_negotiated_caps = 0;
 	vs->vs_curq = 0;
+
+	mi->mi_state = MIDEV_INVALID;
+	mmio_set_cfgdata32(mi, VIRTIO_MMIO_INTERRUPT_STATUS, 0);
+	mmio_set_cfgdata32(mi, VIRTIO_MMIO_QUEUE_READY, 0);
+
 }
 
 /*
@@ -438,24 +445,37 @@ vq_endchains(struct vqueue_info *vq, int used_all_avail)
 }
 
 /* Note: these are in sorted order to make for a fast search */
-/* XXX Adapt these for the MMIO transport. */
 static struct config_reg {
 	uint16_t	cr_offset;	/* register offset */
 	uint8_t		cr_size;	/* size (bytes) */
 	uint8_t		cr_ro;		/* true => reg is read only */
 	const char	*cr_name;	/* name of reg */
 } config_regs[] = {
-	{ VIRTIO_PCI_HOST_FEATURES,	4, 1, "HOST_FEATURES" },
-	{ VIRTIO_PCI_GUEST_FEATURES,	4, 0, "GUEST_FEATURES" },
-	{ VIRTIO_PCI_QUEUE_PFN,		4, 0, "QUEUE_PFN" },
-	{ VIRTIO_PCI_QUEUE_NUM,		2, 1, "QUEUE_NUM" },
-	{ VIRTIO_PCI_QUEUE_SEL,		2, 0, "QUEUE_SEL" },
-	{ VIRTIO_PCI_QUEUE_NOTIFY,	2, 0, "QUEUE_NOTIFY" },
-	{ VIRTIO_PCI_STATUS,		1, 0, "STATUS" },
-	{ VIRTIO_PCI_ISR,		1, 0, "ISR" },
-	{ VIRTIO_MSI_CONFIG_VECTOR,	2, 0, "CONFIG_VECTOR" },
-	{ VIRTIO_MSI_QUEUE_VECTOR,	2, 0, "QUEUE_VECTOR" },
+	{ VIRTIO_MMIO_MAGIC_VALUE, MMIO_MAGIC_VALUE" },		
+	{ VIRTIO_MMIO_VERSION,		  4, 1, "VERSION" },		
+	{ VIRTIO_MMIO_DEVICE_ID, 	  4, 1, "DEVICE_ID" },		
+	{ VIRTIO_MMIO_VENDOR_ID, 	  4, 1, "VENDOR_ID" },		
+	{ VIRTIO_MMIO_HOST_FEATURES, 	  4, 1, "HOST_FEATURES" },		
+	{ VIRTIO_MMIO_HOST_FEATURES_SEL,  4, 0, "HOST_FEATURES_SEL" },		
+	{ VIRTIO_MMIO_GUEST_FEATURES, 	  4, 0, "GUEST_FEATURES" },		
+	{ VIRTIO_MMIO_GUEST_FEATURES_SEL, 4, 0, "GUEST_FEATURES_SEL" },  
+	{ VIRTIO_MMIO_QUEUE_SEL, 	  4, 0, "QUEUE_SEL" },		
+	{ VIRTIO_MMIO_QUEUE_NUM_MAX, 	  4, 1, "QUEUE_NUM_MAX" },		
+	{ VIRTIO_MMIO_QUEUE_NUM, 	  4, 0, "QUEUE_NUM" },		
+	{ VIRTIO_MMIO_QUEUE_READY, 	  4, 0, "QUEUE_READY" },
+	{ VIRTIO_MMIO_QUEUE_NOTIFY, 	  4, 0, "QUEUE_NOTIFY" },		
+	{ VIRTIO_MMIO_INTERRUPT_STATUS,   4, 1, "INTERRUPT_STATUS" },		
+	{ VIRTIO_MMIO_INTERRUPT_ACK, 	  4, 0, "INTERRUPT_ACK" },		
+	{ VIRTIO_MMIO_STATUS,		  4, 0, "STATUS" },		
+	{ VIRTIO_MMIO_QUEUE_DESC_LOW, 	  4, 0, "QUEUE_DESC_LOW" },		
+	{ VIRTIO_MMIO_QUEUE_DESC_HIGH, 	  4, 0, "QUEUE_DESC_HIGH" },		
+	{ VIRTIO_MMIO_QUEUE_AVAIL_LOW, 	  4, 0, "QUEUE_AVAIL_LOW" },		
+	{ VIRTIO_MMIO_QUEUE_AVAIL_HIGH,   4, 0, "QUEUE_AVAIL_HIGH" },		
+	{ VIRTIO_MMIO_QUEUE_USED_LOW, 	  4, 0, "QUEUE_USED_LOW" },		
+	{ VIRTIO_MMIO_QUEUE_USED_HIGH, 	  4, 0, "QUEUE_USED_HIGH" },		
+	{ VIRTIO_MMIO_CONFIG_GENERATION,  4, 1, "CONFIG_GENERATION" },		
 };
+
 
 static inline struct config_reg *
 vi_find_cr(int offset) {
@@ -477,16 +497,10 @@ vi_find_cr(int offset) {
 	return (NULL);
 }
 
-/*
- * Handle pci config space reads.
- * If it's to the MSI-X info, do that.
- * If it's part of the virtio standard stuff, do that.
- * Otherwise dispatch to the actual driver.
- */
 uint64_t
-vi_pci_read(struct pci_devinst *pi, int baridx, uint64_t offset, int size)
+vi_mmio_read(struct mmio_devinst *mi, uint64_t offset, int size)
 {
-	struct virtio_softc *vs = pi->pi_arg;
+	struct virtio_softc *vs = mi->mi_arg;
 	struct virtio_consts *vc;
 	struct config_reg *cr;
 	uint64_t virtio_config_size, max;
@@ -494,9 +508,6 @@ vi_pci_read(struct pci_devinst *pi, int baridx, uint64_t offset, int size)
 	uint32_t newoff;
 	uint32_t value;
 	int error;
-
-	/* XXX probably should do something better than just assert() */
-	assert(baridx == 0);
 
 	if (vs->vs_mtx)
 		pthread_mutex_lock(vs->vs_mtx);
@@ -508,20 +519,13 @@ vi_pci_read(struct pci_devinst *pi, int baridx, uint64_t offset, int size)
 	if (size != 1 && size != 2 && size != 4)
 		goto bad;
 
-	virtio_config_size = /* XXX Adapt for MMIO. */
-
-	if (offset >= virtio_config_size) {
-		/*
-		 * Subtract off the standard size (including MSI-X
-		 * registers if enabled) and dispatch to underlying driver.
-		 * If that fails, fall into general code.
-		 */
+	if (offset >= VIRTIO_MMIO_CONFIG) {
 		newoff = offset - virtio_config_size;
-		max = vc->vc_cfgsize ? vc->vc_cfgsize : 0x100000000;
+		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mi->mi_size - VIRTIO_MMIO_CONFIG);
 		if (newoff + size > max)
 			goto bad;
 		if (vc->vc_cfgread != NULL)
-			error = (*vc->vc_cfgread)(DEV_SOFTC(vs), newoff, size, &value);
+			error = (*vc->vc_cfgread)(MIDEV_SOFTC(vs), newoff, size, &value);
 		else
 			error = 0;
 		if (!error)
@@ -544,6 +548,7 @@ bad:
 		goto done;
 	}
 
+	/* XXX Adjust this for MMIO. */
 	switch (offset) {
 	case VIRTIO_PCI_HOST_FEATURES:
 		value = vc->vc_hv_caps;
@@ -589,14 +594,8 @@ done:
 	return (value);
 }
 
-/*
- * Handle pci config space writes.
- * If it's to the MSI-X info, do that.
- * If it's part of the virtio standard stuff, do that.
- * Otherwise dispatch to the actual driver.
- */
 void
-vi_pci_write(struct pci_devinst *pi, int baridx, uint64_t offset, int size,
+vi_pci_write(struct pci_devinst *pi, uint64_t offset, int size,
     uint64_t value)
 {
 	struct virtio_softc *vs = pi->pi_arg;
@@ -608,17 +607,6 @@ vi_pci_write(struct pci_devinst *pi, int baridx, uint64_t offset, int size,
 	uint32_t newoff;
 	int error;
 
-	if (vs->vs_flags & VIRTIO_USE_MSIX) {
-		if (baridx == pci_msix_table_bar(pi) ||
-		    baridx == pci_msix_pba_bar(pi)) {
-			pci_emul_msix_twrite(pi, offset, size, value);
-			return;
-		}
-	}
-
-	/* XXX probably should do something better than just assert() */
-	assert(baridx == 0);
-
 	if (vs->vs_mtx)
 		pthread_mutex_lock(vs->vs_mtx);
 
@@ -628,19 +616,15 @@ vi_pci_write(struct pci_devinst *pi, int baridx, uint64_t offset, int size,
 	if (size != 1 && size != 2 && size != 4)
 		goto bad;
 
-	virtio_config_size = VIRTIO_PCI_CONFIG_OFF(pci_msix_enabled(pi));
 
-	if (offset >= virtio_config_size) {
-		/*
-		 * Subtract off the standard size (including MSI-X
-		 * registers if enabled) and dispatch to underlying driver.
-		 */
+	/* If writing in the config space, */
+	if (offset >= VIRTIO_MMIO_CONFIG) {
 		newoff = offset - virtio_config_size;
-		max = vc->vc_cfgsize ? vc->vc_cfgsize : 0x100000000;
+		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mi->mi_size - VIRTIO_MMIO_CONFIG);
 		if (newoff + size > max)
 			goto bad;
 		if (vc->vc_cfgwrite != NULL)
-			error = (*vc->vc_cfgwrite)(DEV_SOFTC(vs), newoff, size, value);
+			error = (*vc->vc_cfgwrite)(MIDEV_SOFTC(vs), newoff, size, value);
 		else
 			error = 0;
 		if (!error)
@@ -668,11 +652,12 @@ bad:
 		goto done;
 	}
 
+	/* XXX Adjust for MMIO. */
 	switch (offset) {
 	case VIRTIO_PCI_GUEST_FEATURES:
 		vs->vs_negotiated_caps = value & vc->vc_hv_caps;
 		if (vc->vc_apply_features)
-			(*vc->vc_apply_features)(DEV_SOFTC(vs),
+			(*vc->vc_apply_features)(MIDEV_SOFTC(vs),
 			    vs->vs_negotiated_caps);
 		break;
 	case VIRTIO_PCI_QUEUE_PFN:
@@ -696,9 +681,9 @@ bad:
 		}
 		vq = &vs->vs_queues[value];
 		if (vq->vq_notify)
-			(*vq->vq_notify)(DEV_SOFTC(vs), vq);
+			(*vq->vq_notify)(MIDEV_SOFTC(vs), vq);
 		else if (vc->vc_qnotify)
-			(*vc->vc_qnotify)(DEV_SOFTC(vs), vq);
+			(*vc->vc_qnotify)(MIDEV_SOFTC(vs), vq);
 		else
 			EPRINTLN(
 			    "%s: qnotify queue %d: missing vq/vc notify",
@@ -707,7 +692,7 @@ bad:
 	case VIRTIO_PCI_STATUS:
 		vs->vs_status = value;
 		if (value == 0)
-			(*vc->vc_reset)(DEV_SOFTC(vs));
+			(*vc->vc_reset)(MIDEV_SOFTC(vs));
 		break;
 	case VIRTIO_MSI_CONFIG_VECTOR:
 		vs->vs_msix_cfg_idx = value;
