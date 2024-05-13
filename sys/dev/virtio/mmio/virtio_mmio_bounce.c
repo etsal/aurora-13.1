@@ -71,6 +71,8 @@
 		printf("(%s:%d) " format, __func__, __LINE__, ##__VA_ARGS__); \
 	} while (0)
 
+static device_t vtbounce_parent;
+static driver_t *vtbounce_driver;
 
 /*
  * Information on a bounce character device instance.
@@ -99,6 +101,13 @@ struct vtmmio_bounce_softc {
 	struct vtmmio_softc	vtmb_mmio;
 	struct vtbounce_softc	*vtmb_bounce;
 };
+
+static void
+vtmmio_bounce_identify(driver_t *driver, device_t parent)
+{
+	vtbounce_parent = parent;
+	vtbounce_driver = driver;
+}
 
 static struct vtbounce_softc *
 vtmmio_get_vtb(device_t dev)
@@ -172,6 +181,7 @@ vtmmio_bounce_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *i
 
 static device_method_t vtmmio_bounce_methods[] = {
         /* Device interface. */
+	DEVMETHOD(device_identify,		vtmmio_bounce_identify),
 	DEVMETHOD(device_probe,			vtmmio_bounce_probe),
 	DEVMETHOD(device_attach,		vtmmio_bounce_attach),
 
@@ -347,10 +357,10 @@ virtio_bounce_init(void)
 
 	VTBOUNCE_WARN("\n");
 	/* Create the child and assign its resources. */
-	child = BUS_ADD_CHILD(/* XXX Parent bus */0, 0, vtmmio_bounce_driver.name, -1);
+	child = BUS_ADD_CHILD(vtbounce_parent, 0, vtmmio_bounce_driver.name, -1);
 	bus_set_resource(child, SYS_RES_MEMORY, 0, vtbsc->vtb_baseaddr,
 			vtbsc->vtb_bytes);
-	device_set_driver(child, &vtmmio_bounce_driver);
+	device_set_driver(child, vtbounce_driver);
 
 	/* Have the device and cdev be able to refer to each other. */
 	mmiosc = device_get_softc(child);
@@ -476,6 +486,7 @@ virtio_bounce_kqfilter(struct cdev *dev, struct knote *kn)
 
 	VTBOUNCE_WARN("\n");
 	if (kn->kn_filter != EVFILT_READ) {
+		VTBOUNCE_WARN("\n");
 		kn->kn_data = EINVAL;
 		return (EINVAL);
 	}
