@@ -146,6 +146,22 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	struct vtbounce_softc *sc;
 
 	VTBOUNCE_WARN("\n");
+
+	/* Only forward the listed register writes to userspace. */
+	switch (offset) {
+	case VIRTIO_MMIO_HOST_FEATURES_SEL:
+	case VIRTIO_MMIO_GUEST_FEATURES:
+	case VIRTIO_MMIO_QUEUE_SEL:
+	case VIRTIO_MMIO_QUEUE_NUM:
+	case VIRTIO_MMIO_QUEUE_READY:
+	case VIRTIO_MMIO_STATUS:
+	case VIRTIO_MMIO_INTERRUPT_ACK:
+		break;
+	default:
+		return (1);
+	}
+
+	VTBOUNCE_WARN("\n");
 	sc = vtmmio_get_vtb(dev);
 
 	mtx_lock(&sc->vtb_mtx);

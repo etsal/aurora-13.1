@@ -56,7 +56,6 @@
  * Link a virtio_softc to its constants, the device softc, and
  * the PCI emulation.
  */
-/* XXX Make sure this is correct. */
 void
 vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 		void *dev_softc, struct mmio_devinst *mi,
@@ -548,44 +547,47 @@ bad:
 		goto done;
 	}
 
-	/* XXX Adjust this for MMIO. */
+	/* XXX Implement this for MMIO */
 	switch (offset) {
-	case VIRTIO_PCI_HOST_FEATURES:
-		value = vc->vc_hv_caps;
+	case VIRTIO_MMIO_MAGIC_VALUE:
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_GUEST_FEATURES:
-		value = vs->vs_negotiated_caps;
+	case VIRTIO_MMIO_VERSION:		    
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_QUEUE_PFN:
-		if (vs->vs_curq < vc->vc_nvq)
-			value = vs->vs_queues[vs->vs_curq].vq_pfn;
+	case VIRTIO_MMIO_DEVICE_ID: 	    
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_QUEUE_NUM:
-		value = vs->vs_curq < vc->vc_nvq ?
-		    vs->vs_queues[vs->vs_curq].vq_qsize : 0;
+	case VIRTIO_MMIO_VENDOR_ID: 	    
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_QUEUE_SEL:
-		value = vs->vs_curq;
+	case VIRTIO_MMIO_HOST_FEATURES: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_QUEUE_NOTIFY:
-		value = 0;	/* XXX */
+	case VIRTIO_MMIO_QUEUE_NUM_MAX: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_STATUS:
-		value = vs->vs_status;
+	case VIRTIO_MMIO_QUEUE_READY: 	  
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_ISR:
-		value = vs->vs_isr;
-		vs->vs_isr = 0;		/* a read clears this flag */
-		if (value)
-			pci_lintr_deassert(pi);
+	case VIRTIO_MMIO_INTERRUPT_STATUS:     	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_MSI_CONFIG_VECTOR:
-		value = vs->vs_msix_cfg_idx;
+	case VIRTIO_MMIO_STATUS:		    
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_MSI_QUEUE_VECTOR:
-		value = vs->vs_curq < vc->vc_nvq ?
-		    vs->vs_queues[vs->vs_curq].vq_msix_idx :
-		    VIRTIO_MSI_NO_VECTOR;
+	case VIRTIO_MMIO_CONFIG_GENERATION:  		
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
 	}
 done:
@@ -652,56 +654,67 @@ bad:
 		goto done;
 	}
 
-	/* XXX Adjust for MMIO. */
+	/* XXX Implement for MMIO. */
 	switch (offset) {
-	case VIRTIO_PCI_GUEST_FEATURES:
-		vs->vs_negotiated_caps = value & vc->vc_hv_caps;
-		if (vc->vc_apply_features)
-			(*vc->vc_apply_features)(MIDEV_SOFTC(vs),
-			    vs->vs_negotiated_caps);
+	case VIRTIO_MMIO_HOST_FEATURES_SEL:  		
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_QUEUE_PFN:
-		if (vs->vs_curq >= vc->vc_nvq)
-			goto bad_qindex;
-		vi_vq_init(vs, value);
+	case VIRTIO_MMIO_GUEST_FEATURES: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_QUEUE_SEL:
-		/*
-		 * Note that the guest is allowed to select an
-		 * invalid queue; we just need to return a QNUM
-		 * of 0 while the bad queue is selected.
-		 */
-		vs->vs_curq = value;
+	case VIRTIO_MMIO_GUEST_FEATURES_SEL:   
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_QUEUE_NOTIFY:
-		if (value >= (unsigned int)vc->vc_nvq) {
-			EPRINTLN("%s: queue %d notify out of range",
-				name, (int)value);
-			goto done;
-		}
-		vq = &vs->vs_queues[value];
-		if (vq->vq_notify)
-			(*vq->vq_notify)(MIDEV_SOFTC(vs), vq);
-		else if (vc->vc_qnotify)
-			(*vc->vc_qnotify)(MIDEV_SOFTC(vs), vq);
-		else
-			EPRINTLN(
-			    "%s: qnotify queue %d: missing vq/vc notify",
-				name, (int)value);
+	case VIRTIO_MMIO_QUEUE_SEL: 	    
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_PCI_STATUS:
-		vs->vs_status = value;
-		if (value == 0)
-			(*vc->vc_reset)(MIDEV_SOFTC(vs));
+	case VIRTIO_MMIO_QUEUE_NUM: 	    
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_MSI_CONFIG_VECTOR:
-		vs->vs_msix_cfg_idx = value;
+	case VIRTIO_MMIO_QUEUE_READY: 	  
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
-	case VIRTIO_MSI_QUEUE_VECTOR:
-		if (vs->vs_curq >= vc->vc_nvq)
-			goto bad_qindex;
-		vq = &vs->vs_queues[vs->vs_curq];
-		vq->vq_msix_idx = value;
+	case VIRTIO_MMIO_QUEUE_NOTIFY: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_INTERRUPT_ACK: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_STATUS:		    
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_QUEUE_DESC_LOW: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_QUEUE_DESC_HIGH: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_QUEUE_AVAIL_LOW: 	    	
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_QUEUE_USED_LOW:
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
+		break;
+	case VIRTIO_MMIO_QUEUE_USED_HIGH:
+		printf("%s:%d Unimplemented\n", __func__, __LINE__);
+		exit(1);
 		break;
 	}
 	goto done;

@@ -450,6 +450,10 @@ mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
 	sc->vbsc_vq.vq_qsize = VTBLK_RINGSZ;
 	/* sc->vbsc_vq.vq_notify = we have no per-queue notify */
 
+	/* 
+	 * XXX Create enough of an environment for the code below to succeed. 
+	 * Do this from main().
+	 */
 	/*
 	 * If an explicit identifier is not given, create an
 	 * identifier using parts of the md5 sum of the filename.
