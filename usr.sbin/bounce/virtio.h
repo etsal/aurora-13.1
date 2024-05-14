@@ -273,6 +273,8 @@ struct vqueue_info {
 	struct vring_desc *vq_desc;	/* descriptor array */
 	struct vring_avail *vq_avail;	/* the "avail" ring */
 	struct vring_used *vq_used;	/* the "used" ring */
+	struct iov_emul	*vq_readio;	/* emulated MMIO read IO vector */
+	struct iov_emul	*vq_writeio;	/* emulated MMIO write IO vector */
 
 };
 /* as noted above, these are sort of backwards, name-wise */

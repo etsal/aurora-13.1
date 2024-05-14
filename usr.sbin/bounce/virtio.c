@@ -38,6 +38,8 @@
 #include <pthread.h>
 #include <pthread_np.h>
 
+#include "iov_emul.h"
+#include "mmio_emul.h"
 #include "virtio.h"
 
 /*
@@ -120,7 +122,7 @@ vi_vq_init(struct virtio_softc *vs, uint32_t pfn)
 	vq->vq_pfn = pfn;
 	phys = (uint64_t)pfn << VRING_PFN;
 	size = vring_size_aligned(vq->vq_qsize);
-	base = /* XXX Use the region's address. */
+	base = vs->vs_mi->mi_mmio;
 
 	/* First page(s) are descriptors... */
 	vq->vq_desc = (struct vring_desc *)base;
@@ -149,18 +151,33 @@ vi_vq_init(struct virtio_softc *vs, uint32_t pfn)
  */
 static inline void
 _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
-    int n_iov, struct vi_req *reqp)
+    int n_iov, struct vi_req *reqp, struct vqueue_info *vq)
 {
 	if (i >= n_iov)
 		return;
-	iov[i].iov_base = /* XXX Use the virtual address of the VQ. */
-	iov[i].iov_len = vd->len;
-	if ((vd->flags & VRING_DESC_F_WRITE) == 0)
-		reqp->readable++;
-	else
+
+	/*
+	 * Preallocate a descriptor data region for the descriptor
+	 */
+	if ((vd->flags & VRING_DESC_F_WRITE) == 0) {
+		if (iove_add(vq->vq_readio, vd->len, &iov) != 0)
+			return;
+
+		reqp->readable++; 
+	} else {
+		if (iove_add(vq->vq_writeio, vd->len, &iov) != 0)
+			return;
+
 		reqp->writable++;
+	}
 }
 #define	VQ_MAX_DESCRIPTORS	512	/* see below */
+
+int
+vq_import_indirect()
+{
+	/* XXX Use the PFN to make a single IO. */
+}
 
 /*
  * Examine the chain of descriptors starting at the "next one" to
@@ -207,10 +224,22 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 	struct vring_desc *vdir, *vindir, *vp;
 	struct virtio_softc *vs;
 	const char *name;
+	int error;
 
 	vs = vq->vq_vs;
 	name = vs->vs_vc->vc_name;
 	memset(&req, 0, sizeof(req));
+
+	assert(vq->vq_readio == NULL);
+	assert(vq->vq_writeio == NULL);
+
+	vindir = NULL;
+	vq->vq_readio = iove_alloc();
+	vq->vq_writeio = iove_alloc();
+	if (vq->vq_readio == NULL || vq->vq_writeio == NULL) {
+		iove_free(vq->vq_readio);
+		iove_free(vq->vq_writeio);
+	}
 
 	/*
 	 * Note: it's the responsibility of the guest not to
@@ -253,11 +282,11 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 			    "%s: descriptor index %u out of range, "
 			    "driver confused?",
 			    name, next);
-			return (-1);
+			goto error;
 		}
 		vdir = &vq->vq_desc[next];
 		if ((vdir->flags & VRING_DESC_F_INDIRECT) == 0) {
-			_vq_record(i, vdir, iov, niov, &req);
+			_vq_record(i, vdir, iov, niov, &req, vq);
 			i++;
 		} else if ((vs->vs_vc->vc_hv_caps &
 		    VIRTIO_RING_F_INDIRECT_DESC) == 0) {
@@ -265,7 +294,7 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 			    "%s: descriptor has forbidden INDIRECT flag, "
 			    "driver confused?",
 			    name);
-			return (-1);
+			goto error;
 		} else {
 			n_indir = vdir->len / 16;
 			if ((vdir->len & 0xf) || n_indir == 0) {
@@ -273,9 +302,10 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 				    "%s: invalid indir len 0x%x, "
 				    "driver confused?",
 				    name, (u_int)vdir->len);
-				return (-1);
+				goto error;
 			}
-			vindir = /* XXX Calculate properly. */
+
+			vindir = vq_import_indirect();
 			/*
 			 * Indirects start at the 0th, then follow
 			 * their own embedded "next"s until those run
@@ -291,11 +321,15 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 					    "%s: indirect desc has INDIR flag,"
 					    " driver confused?",
 					    name);
-					return (-1);
+					goto error;
 				}
-				_vq_record(i, vp, iov, niov, &req);
-				if (++i > VQ_MAX_DESCRIPTORS)
-					goto loopy;
+				_vq_record(i, vp, iov, niov, &req, vq);
+				if (++i > VQ_MAX_DESCRIPTORS) {
+					EPRINTLN(
+					"%s: descriptor loop? count > %d - driver confused?",
+					name, i);
+					goto error;
+				}
 				if ((vp->flags & VRING_DESC_F_NEXT) == 0)
 					break;
 				next = vp->next;
@@ -304,7 +338,7 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 					    "%s: invalid next %u > %u, "
 					    "driver confused?",
 					    name, (u_int)next, n_indir);
-					return (-1);
+					goto error;
 				}
 			}
 		}
@@ -312,14 +346,30 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 			goto done;
 	}
 
-loopy:
-	EPRINTLN(
-	    "%s: descriptor loop? count > %d - driver confused?",
-	    name, i);
+error:
+	iove_free(vq->vq_readio);
+	iove_free(vq->vq_writeio);
+	vq->vq_readio = vq->vq_writeio = NULL;
+	free(vindir);
+
 	return (-1);
 
 done:
+	/* Read in readable descriptors from the kernel. */
+	error = iove_import(vs, vq->readio);
+
+	free(vindir);
+
+	if (error != 0) {
+		EPRINTLN("Reading in data failed with %d", data);
+		return (-1);
+	}
+
+	iove_free(vq->vq_readio);
+	vq->vq_readio = NULL;
+
 	*reqp = req;
+
 	return (i);
 }
 
@@ -379,6 +429,17 @@ vq_relchain_publish(struct vqueue_info *vq)
 void
 vq_relchain(struct vqueue_info *vq, uint16_t idx, uint32_t iolen)
 {
+	struct virtio_softc *vs = vq->vq_vs;
+	int error;
+
+	/* Forward the writes to the driver's descriptors. */
+	error = iove_export(vs, vq->vq_writeio);
+	if (error != 0)
+		EPRINTLN("Writing out data failed with %d\n", error);
+
+	iove_free(vq->vq_writeio);
+	vq->vq_writeio = NULL;
+
 	vq_relchain_prepare(vq, idx, iolen);
 	vq_relchain_publish(vq);
 }
@@ -415,6 +476,7 @@ vq_endchains(struct vqueue_info *vq, int used_all_avail)
 	 * entire avail was processed, we need to interrupt always.
 	 */
 	vs = vq->vq_vs;
+
 	old_idx = vq->vq_save_used;
 	vq->vq_save_used = new_idx = vq->vq_used->idx;
 

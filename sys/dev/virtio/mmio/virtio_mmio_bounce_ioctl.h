@@ -8,5 +8,12 @@
 #define VIRTIO_BOUNCE_FINI	_IO('v', 2)
 #define VIRTIO_BOUNCE_KICK	_IO('v', 3)
 #define VIRTIO_BOUNCE_ACK	_IO('v', 4)
+#define VIRTIO_BOUNCE_IO	_IORW('v', 5)
+
+struct virtio_bounce_io_args {
+	struct iovec	*iov;
+	size_t		cnt;	
+	bool		touser;
+};
 
 #endif /* _VIRTIO_MMIO_BOUNCE_IOCTL_ */
