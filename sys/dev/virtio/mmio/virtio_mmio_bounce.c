@@ -423,6 +423,26 @@ virtio_bounce_ack(struct vtbounce_softc *sc)
 	mtx_unlock(&sc->vtb_mtx);
 }
 
+static int
+virtio_bounce_io(struct virtio_bounce_io_args *args)
+{
+	int error = 0;
+	int i;
+
+	for (i = 0; i < args->cnt; i++) {
+
+		if (args->touser)
+			error = copyout(iov->driver[i], iov->device[i], iov->lens);
+		else
+			error = copyin(iov->device[i], iov->driver[i], iov->lens);
+
+		if (error != 0)
+			break;
+	}
+
+	return (error);
+}
+
 
 static int
 virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, struct thread *td)
@@ -448,6 +468,9 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, stru
 		break;
 	case VIRTIO_BOUNCE_ACK:
 		virtio_bounce_ack(sc);
+		break;
+	case VIRTIO_BOUNCE_IO:
+		ret = virtio_bounce_io((struct virtio_bounce_io_args *)data);
 		break;
 	}
 
@@ -529,7 +552,7 @@ static int
 virtio_bounce_dev_init(void)
 {
 	bouncedev = make_dev(&virtio_bounce_cdevsw, 0, UID_ROOT, GID_OPERATOR,
-	    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, "virtio_bounce");
+	    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP, "virtio_bounce");
 	if (bouncedev == NULL)
 		return (ENOMEM);
 	VTBOUNCE_WARN("\n");

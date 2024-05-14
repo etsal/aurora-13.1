@@ -177,6 +177,7 @@ int
 vq_import_indirect()
 {
 	/* XXX Use the PFN to make a single IO. */
+	assert(0);
 }
 
 /*

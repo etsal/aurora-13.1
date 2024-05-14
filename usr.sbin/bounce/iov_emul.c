@@ -16,7 +16,14 @@ iove_alloc(void)
 {
 	struct iov_emul *iove;
 
-	iove = calloc(IOVE_INIT, sizeof(*iove));
+	iove = calloc(1, sizeof(*iove));
+
+	iove->iove_tf = calloc(IOVE_INIT, sizeof(*iove->iove_tf));
+	if (iove->iove_tf == NULL) {
+		free(iove);
+		return (NULL);
+	}
+
 	iove->iove_maxcnt = IOVE_INIT;
 
 	return (iove);
@@ -28,24 +35,24 @@ iove_free(struct iov_emul *iove)
 	int i;
 
 	for (i = 0; i < iove->iove_ind; i++)
-		free(iove->iove_iov[i].iov_base);
+		free(iove->iove_tf[i].vtbt_device);
 
 	free(iove);
 }
 
 
 int
-iove_add(struct iov_emul *iove, size_t len, struct iovec *iovp)
+iove_add(struct iov_emul *iove, caddr_t phys, size_t len, struct iovec *iovp)
 {
-	struct iovec *iov = iove->iove_iov;
+	struct virtio_bounce_transfer *tf = iove->iove_tf;
 	char *base;
 
 	if (iove->iove_ind == iove->iove_maxcnt){
-		iov = reallocarray(iov, 2 * iove->iove_maxcnt,
-				sizeof(*iov));
-		if (iov == NULL)
+		tf = reallocarray(tf, 2 * iove->iove_maxcnt,
+				sizeof(*tf));
+		if (tf == NULL)
 			return (ENOMEM);
-		iove->iove_iov = iov;
+		iove->iove_tf = tf;
 		iove->iove_maxcnt *= 2;
 	}
 
@@ -53,12 +60,13 @@ iove_add(struct iov_emul *iove, size_t len, struct iovec *iovp)
 	if (base == NULL)
 		return (ENOMEM);
 
-	iov[iove->iove_ind].iov_base = base;
-	iov[iove->iove_ind].iov_len = len;
-
-	*iovp = iov[iove->iove_ind];
-
+	iove->iove_tf[iove->iove_ind].vtbt_device = base;
+	iove->iove_tf[iove->iove_ind].vtbt_driver = phys;
+	iove->iove_tf[iove->iove_ind].vtbt_len = len;
 	iove->iove_ind += 1;
+
+	iovp->iov_base = base;
+	iovp->iov_len = len;
 
 	return (0);
 }
@@ -72,12 +80,12 @@ iove_import(struct virtio_softc *vs, struct iov_emul *iove)
 {
 	int fd = vs->vs_mi->mi_fd;
 	struct virtio_bounce_io_args args = {
-		.iov = iove->iove_iov,
+		.transfers = iove->iove_tf,
 		.cnt = iove->iove_ind,
 		.touser = true,
 	};
 
-	return (ioctl(fd, VIRTIO_BOUNCE_IO, &args));
+	return (ioctl(fd, VIRTIO_BOUNCE_TRANSFER, &args));
 }
 
 /*
@@ -88,11 +96,11 @@ iove_export(struct virtio_softc *vs, struct iov_emul *iove)
 {
 	int fd = vs->vs_mi->mi_fd;
 	struct virtio_bounce_io_args args = {
-		.iov = iove->iove_iov,
+		.transfers = iove->iove_tf,
 		.cnt = iove->iove_ind,
-		.touser = true,
+		.touser = false,
 	};
 
-	return (ioctl(fd, VIRTIO_BOUNCE_IO, &args));
+	return (ioctl(fd, VIRTIO_BOUNCE_TRANSFER, &args));
 }
 

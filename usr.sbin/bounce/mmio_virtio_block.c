@@ -89,7 +89,9 @@ _Static_assert(VTBLK_RINGSZ <= BLOCKIF_RING_MAX, "Each ring entry must be able t
     VTBLK_F_BLK_SIZE |						    \
     VTBLK_F_FLUSH    |						    \
     VTBLK_F_TOPOLOGY |						    \
-    VIRTIO_RING_F_INDIRECT_DESC )	/* indirect descriptors */
+    )
+    /* XXX Reactivate */
+//    VIRTIO_RING_F_INDIRECT_DESC )	/* indirect descriptors */
 
 /*
  * The current blockif_delete() interface only allows a single delete

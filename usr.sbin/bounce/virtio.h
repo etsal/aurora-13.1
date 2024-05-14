@@ -306,24 +306,17 @@ vq_has_descs(struct vqueue_info *vq)
 }
 
 /*
- * Deliver an interrupt to the guest for a specific MSI-X queue or
- * event.
- */
-static inline void
-vi_interrupt(struct virtio_softc *vs, uint8_t isr, uint16_t msix_idx)
-{
-
-	/* XXX Adapt for the MMIO transport. */
-}
-
-/*
  * Deliver an interrupt to the guest on the given virtual queue (if
  * possible, or a generic MSI interrupt if not using MSI-X).
  */
 static inline void
 vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
 {
-	/* XXX Adapt for the MMIO transport. */
+	int error;
+
+	error = ioctl(vs->vs_mi->mi_fd, VIRTIO_BOUNCE_KICK);
+	if (error != 0)
+		EPRINTLN("device kick failed with %d\n", error);
 }
 
 static inline void
