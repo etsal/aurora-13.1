@@ -499,101 +499,8 @@ vi_find_cr(int offset) {
 uint64_t
 vi_mmio_read(struct mmio_devinst *mi, uint64_t offset, int size)
 {
-	struct virtio_softc *vs = mi->mi_arg;
-	struct virtio_consts *vc;
-	struct config_reg *cr;
-	uint64_t virtio_config_size, max;
-	const char *name;
-	uint32_t newoff;
-	uint32_t value;
-	int error;
-
-	if (vs->vs_mtx)
-		pthread_mutex_lock(vs->vs_mtx);
-
-	vc = vs->vs_vc;
-	name = vc->vc_name;
-	value = size == 1 ? 0xff : size == 2 ? 0xffff : 0xffffffff;
-
-	if (size != 1 && size != 2 && size != 4)
-		goto bad;
-
-	if (offset >= VIRTIO_MMIO_CONFIG) {
-		newoff = offset - virtio_config_size;
-		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mi->mi_size - VIRTIO_MMIO_CONFIG);
-		if (newoff + size > max)
-			goto bad;
-		if (vc->vc_cfgread != NULL)
-			error = (*vc->vc_cfgread)(MIDEV_SOFTC(vs), newoff, size, &value);
-		else
-			error = 0;
-		if (!error)
-			goto done;
-	}
-
-bad:
-	cr = vi_find_cr(offset);
-	if (cr == NULL || cr->cr_size != size) {
-		if (cr != NULL) {
-			/* offset must be OK, so size must be bad */
-			EPRINTLN(
-			    "%s: read from %s: bad size %d",
-			    name, cr->cr_name, size);
-		} else {
-			EPRINTLN(
-			    "%s: read from bad offset/size %jd/%d",
-			    name, (uintmax_t)offset, size);
-		}
-		goto done;
-	}
-
-	/* XXX Implement this for MMIO */
-	switch (offset) {
-	case VIRTIO_MMIO_MAGIC_VALUE:
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_VERSION:		    
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_DEVICE_ID: 	    
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_VENDOR_ID: 	    
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_HOST_FEATURES: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_NUM_MAX: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_READY: 	  
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_INTERRUPT_STATUS:     	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_STATUS:		    
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_CONFIG_GENERATION:  		
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	}
-done:
-	if (vs->vs_mtx)
-		pthread_mutex_unlock(vs->vs_mtx);
-	return (value);
+	DPRINTF(("virtio: attempt to read MMIO at %lu", offset));
+	return (1);
 }
 
 void
@@ -664,10 +571,6 @@ bad:
 		printf("%s:%d Unimplemented\n", __func__, __LINE__);
 		exit(1);
 		break;
-	case VIRTIO_MMIO_GUEST_FEATURES_SEL:   
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
 	case VIRTIO_MMIO_QUEUE_SEL: 	    
 		printf("%s:%d Unimplemented\n", __func__, __LINE__);
 		exit(1);
@@ -676,43 +579,11 @@ bad:
 		printf("%s:%d Unimplemented\n", __func__, __LINE__);
 		exit(1);
 		break;
-	case VIRTIO_MMIO_QUEUE_READY: 	  
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_NOTIFY: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
 	case VIRTIO_MMIO_INTERRUPT_ACK: 	    	
 		printf("%s:%d Unimplemented\n", __func__, __LINE__);
 		exit(1);
 		break;
 	case VIRTIO_MMIO_STATUS:		    
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_DESC_LOW: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_DESC_HIGH: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_AVAIL_LOW: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_USED_LOW:
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
-	case VIRTIO_MMIO_QUEUE_USED_HIGH:
 		printf("%s:%d Unimplemented\n", __func__, __LINE__);
 		exit(1);
 		break;
