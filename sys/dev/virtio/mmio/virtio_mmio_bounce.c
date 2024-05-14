@@ -154,8 +154,8 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	case VIRTIO_MMIO_QUEUE_SEL:
 	case VIRTIO_MMIO_QUEUE_NUM:
 	case VIRTIO_MMIO_QUEUE_READY:
-	case VIRTIO_MMIO_STATUS:
 	case VIRTIO_MMIO_INTERRUPT_ACK:
+	case VIRTIO_MMIO_STATUS:
 		break;
 	default:
 		return (1);
