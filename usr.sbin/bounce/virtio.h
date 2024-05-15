@@ -160,7 +160,7 @@
 #define	VRING_PFN		12
 
 /*
- * virtio vendor/device IDs
+ * PCI vendor/device IDs
  */
 #define	VIRTIO_VENDOR		0x1AF4
 #define	VIRTIO_DEV_NET		0x1000
@@ -172,17 +172,17 @@
 #define VIRTIO_DEV_INPUT	0x1052
 
 /*
- * virtio revision IDs
+ * PCI revision IDs
  */
 #define VIRTIO_REV_INPUT	1
 
 /*
- * virtio subvendor IDs
+ * PCI subvendor IDs
  */
 #define VIRTIO_SUBVEN_INPUT	0x108E
 
 /*
- * virtio subdevice IDs
+ * PCI subdevice IDs
  */
 #define VIRTIO_SUBDEV_INPUT	0x1100
 
@@ -193,6 +193,7 @@ vring_size_aligned(u_int qsz)
 	return (roundup2(vring_size(qsz, VRING_ALIGN), VRING_ALIGN));
 }
 
+struct mmio_devinst;
 struct vqueue_info;
 
 /* XXX Clean this up further as we go. */
@@ -306,6 +307,7 @@ vq_has_descs(struct vqueue_info *vq)
 }
 
 /*
+}
  * Deliver an interrupt to the guest on the given virtual queue (if
  * possible, or a generic MSI interrupt if not using MSI-X).
  */

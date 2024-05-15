@@ -1,0 +1,65 @@
+block_if.c
+	-> Removed snapshotting
+	-> Remove legacy config parsing
+
+block_if.h
+	-> Remove snapshotting/legacy config
+	-> Move pci_devinst to mmio_devinst
+
+config.c
+	-> Identical
+
+config.h
+	-> Identical
+
+debug.h
+	-> Simplified macro
+
+iov.c
+	-> Identical
+
+iov.h
+	-> Identical
+
+iov_emul.c
+	-> New
+
+iov_emul.h
+	-> New
+
+mevent.c
+	-> Identical
+
+mevent.h
+	-> Identical
+
+mmio_emul.h (<-  pci_emul.h)
+	-> Rewrote and only kept certian helper functions
+
+mmio_virtio_block.c (<- pci_virtio_block.c)
+	-> Turn off indirect descriptors
+	-> Removed snapshotting functions
+	-> [HACK] Turn off vtblk_resized
+	-> vtblk_init: Remove boot device-related code
+	-> Change device name
+	-> Change cfgdata handling
+	-> Remove vi_intr_init
+
+virtio.c
+	-> vi_reset_dev() heavily modified
+	-> vi_vq_init() has a different way of calculating the vq device address
+	-> _vq_record() now uses the new iove_* functions.
+	-> New vq_import_indirect() function.
+	-> vq_getchain(): Initialize the read/write virtqueues.
+	-> No indirect vnode handling
+	-> vq_relchain() calls iove_export()
+	-> Replaced PCI registers with MMIO registers
+	-> vi_pci_read() -> vi_mmio_read() (noop)
+	-> vi_pci_write() -> vi_mmio_write()
+	-> Removed snapshotting code
+
+virtio.h
+	-> Removed MSI/MSI-x state from virtio
+	-> Removed snapshotting methdos for device
+	-> Added per-vqueue vectors
+	-> Removed vi_interrupt

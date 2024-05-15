@@ -37,6 +37,26 @@
 
 #include <assert.h>
 
+struct mmio_devinst;
+
+struct mmio_devemu {
+	const char      *me_emu;	/* Name of device emulation */
+
+	/* instance creation */
+	int       (*me_init)(struct mmio_devinst *, nvlist_t *);
+	const char *me_alias;
+
+	/* mmio space read/write callbacks */
+	int	(*me_cfgwrite)(struct mmio_devinst *mi, int offset,
+			       int bytes, uint32_t val);
+	int	(*me_cfgread)(struct mmio_devinst *mi, int offset,
+			      int bytes, uint32_t *retval);
+
+	void      (*me_write)(struct mmio_devinst *mi, uint64_t offset,
+				int size, uint32_t value);
+	uint64_t  (*me_read)(struct mmio_devinst *mi, uint64_t offset,
+				int size);
+
 enum mmio_devstate {
 	MIDEV_INVALID,
 	MIDEV_ACKNOWLEDGED,
@@ -57,25 +77,6 @@ struct mmio_devinst {
 
 	void      *mi_arg;		/* devemu-private data */
 };
-
-struct mmio_devemu {
-	const char      *me_emu;	/* Name of device emulation */
-
-	/* instance creation */
-	int       (*me_init)(struct mmio_devinst *, nvlist_t *);
-	const char *me_alias;
-
-	/* mmio space read/write callbacks */
-	int	(*me_cfgwrite)(struct mmio_devinst *mi, int offset,
-			       int bytes, uint32_t val);
-	int	(*me_cfgread)(struct mmio_devinst *mi, int offset,
-			      int bytes, uint32_t *retval);
-
-	void      (*me_write)(struct mmio_devinst *mi, uint64_t offset,
-				int size, uint32_t value);
-	uint64_t  (*me_read)(struct mmio_devinst *mi, uint64_t offset,
-				int size);
-
 };
 #define MMIO_EMUL_SET(x)   DATA_SET(mmio_devemu_set, x)
 

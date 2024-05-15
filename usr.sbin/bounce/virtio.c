@@ -82,6 +82,13 @@ vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 	}
 }
 
+/*
+ * Reset device (device-wide).  This erases all queues, i.e.,
+ * all the queues become invalid (though we don't wipe out the
+ * internal pointers, we just clear the VQ_ALLOC flag).
+ *
+ * It resets negotiated features to "none".
+ */
 void
 vi_reset_dev(struct virtio_softc *vs)
 {
@@ -123,9 +130,14 @@ vi_vq_init(struct virtio_softc *vs)
 	//size_t size;
 	char *base;
 
+	/* XXX Make sure passing mi_mmio to the vq works. i
+	 * We should be explicitly initializing the control blcok
+	 * in the commonly mapped region.
+	 *
+	 * XXX Do we even need to memory map the control block?
+	 */
 	vq = &vs->vs_queues[vs->vs_curq];
-	/* XXX Find out how this was originally used. */
-	//size = vring_size_aligned(vq->vq_qsize);
+	size = vring_size_aligned(vq->vq_qsize);
 	base = vs->vs_mi->mi_mmio;
 
 	/* First page(s) are descriptors... */
@@ -160,9 +172,7 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 	if (i >= n_iov)
 		return;
 
-	/*
-	 * Preallocate a descriptor data region for the descriptor
-	 */
+	/* Preallocate a descriptor data region for the descriptor */
 	if ((vd->flags & VRING_DESC_F_WRITE) == 0) {
 		if (iove_add(vq->vq_readio, vd->addr, vd->len, iov) != 0)
 			return;
@@ -378,7 +388,6 @@ done:
 	vq->vq_readio = NULL;
 
 	*reqp = req;
-
 	return (i);
 }
 
@@ -485,7 +494,6 @@ vq_endchains(struct vqueue_info *vq, int used_all_avail)
 	 * entire avail was processed, we need to interrupt always.
 	 */
 	vs = vq->vq_vs;
-
 	old_idx = vq->vq_save_used;
 	vq->vq_save_used = new_idx = vq->vq_used->idx;
 
@@ -546,10 +554,8 @@ static struct config_reg {
 	{ VIRTIO_MMIO_CONFIG_GENERATION,  4, 1, "CONFIG_GENERATION" },		
 };
 
-
 static inline struct config_reg *
-vi_find_cr(int offset)
-{
+vi_find_cr(int offset) {
 	u_int hi, lo, mid;
 	struct config_reg *cr;
 

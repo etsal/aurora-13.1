@@ -441,27 +441,6 @@ blockif_init(void)
 	(void) signal(SIGCONT, SIG_IGN);
 }
 
-/* XXX Hardcode a config for the block interface. */
-#if 0
-int
-blockif_legacy_config(nvlist_t *nvl, const char *opts)
-{
-	char *cp, *path;
-
-	if (opts == NULL)
-		return (0);
-
-	cp = strchr(opts, ',');
-	if (cp == NULL) {
-		set_config_value_node(nvl, "path", opts);
-		return (0);
-	}
-	path = strndup(opts, cp - opts);
-	set_config_value_node(nvl, "path", path);
-	free(path);
-	return (pci_parse_legacy_config(nvl, cp + 1));
-}
-#endif
 
 struct blockif_ctxt *
 blockif_open(nvlist_t *nvl, const char *ident)

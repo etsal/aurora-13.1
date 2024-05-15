@@ -417,7 +417,7 @@ mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
 	/*
 	 * The supplied backing file has to exist
 	 */
-	/* XXX Add a human readable name, or in general some other identifier. */
+	/* Make sure the name fits */
 	snprintf(bident, sizeof(bident), "%s", mi->mi_name);
 	bctxt = blockif_open(nvl, bident);
 	if (bctxt == NULL) {
