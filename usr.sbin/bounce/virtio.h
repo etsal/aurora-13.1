@@ -33,7 +33,7 @@
 
 #include <dev/virtio/virtio.h>
 #include <dev/virtio/virtio_ring.h>
-#include <dev/virtio/pci/virtio_mmio.h>
+#include <dev/virtio/mmio/virtio_mmio.h>
 
 /*
  * These are derived from several virtio specifications.
@@ -310,7 +310,7 @@ vq_has_descs(struct vqueue_info *vq)
  * possible, or a generic MSI interrupt if not using MSI-X).
  */
 static inline void
-vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
+vq_interrupt(struct virtio_softc *vs, struct vqueue_info __unused *vq)
 {
 	int error;
 
@@ -370,5 +370,5 @@ void	vq_endchains(struct vqueue_info *vq, int used_all_avail);
 
 uint64_t vi_mmio_read(struct mmio_devinst *mi, uint64_t offset, int size);
 void	vi_mmio_write(struct mmio_devinst *mi, uint64_t offset, int size,
-	uint64_t value);
+	uint32_t value);
 #endif	/* _BHYVE_VIRTIO_H_ */

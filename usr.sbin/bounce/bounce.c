@@ -12,38 +12,39 @@
 
 #include <sys/event.h>
 
-/* XXX Fix this up when we integrate with the kernel build system. */
-#include </usr/src/sys/dev/virtio/mmio/virtio.h>
-#include </usr/src/sys/dev/virtio/mmio/virtio_mmio.h>
-#include </usr/src/sys/dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+#include <dev/virtio/virtio.h>
+#include <dev/virtio/mmio/virtio_mmio.h>
+#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+
+#include "mmio_emul.h"
 
 #define BOUNCEDEV ("/dev/virtio_bounce")
 
 /* XXX We currently hardcode how large the region is. */
 #define MMIO_REGION_SIZE (1024 * 1024 * 10)
 
-void
-handle_state_change(uint32_t status)
+static void
+handle_state_change(struct mmio_devinst *mi, uint32_t status)
 {
-	switch (state) {
+	switch (mi->mi_state) {
 	case MIDEV_INVALID:
 		if (status & VIRTIO_CONFIG_STATUS_ACK)
-			state = MIDEV_ACKNOWLEDGED;
+			mi->mi_state = MIDEV_ACKNOWLEDGED;
 		break;
 
 	case MIDEV_ACKNOWLEDGED:
 		if (status & VIRTIO_CONFIG_STATUS_DRIVER)
-			state = MIDEV_DRIVER_FOUND;
+			mi->mi_state = MIDEV_DRIVER_FOUND;
 		break;
 
 	case MIDEV_DRIVER_FOUND:
 		if (status & VIRTIO_CONFIG_S_FEATURES_OK)
-			state = MIDEV_FEATURES_OK;
+			mi->mi_state = MIDEV_FEATURES_OK;
 		break;
 
 	case MIDEV_FEATURES_OK:
 		if (status & VIRTIO_CONFIG_STATUS_DRIVER_OK)
-			state = MIDEV_LIVE;
+			mi->mi_state = MIDEV_LIVE;
 
 		break;
 
@@ -51,52 +52,55 @@ handle_state_change(uint32_t status)
 		break;
 
 	case MIDEV_FAILED:
-		state = MIDEV_FAILED;
+		mi->mi_state = MIDEV_FAILED;
 		break;
 
 	default:
-		errx("Invalid state %d", state);
+		errx(EXIT_FAILURE, "Invalid state %d", mi->mi_state);
 		exit(1);
 	}
 }
 
-void
-handle_status(struct mmio_devemu *mi, uint32_t status)
+static void
+handle_status(struct mmio_devinst *mi, uint32_t status)
 {
 	if (status & VIRTIO_CONFIG_STATUS_FAILED) {
-		state = MIDEV_DRIVER_FAILED;
+		mi->mi_state = MIDEV_FAILED;
 		return;
 	}
 
 	if (status & VIRTIO_CONFIG_STATUS_RESET) {
-		/* XXX Call this properly. */
-		vi_reset_dev();
-		state = MIDEV_DRIVER_INVALID;
+		/* XXX Call a device reset. */
+		//vi_reset_dev();
+		mi->mi_state = MIDEV_INVALID;
 		return;
 	}
 
-	handle_state_change();
+	handle_state_change(mi, status);
 }
 
-void
-handle_mmio(struct mmio_devemu *mi, uint64_t offset)
+/* XXX Set up init_mmio_vtblk() */
+/* XXX Use vi_mmio_write as a main loop instead. */
+static void
+handle_mmio(struct mmio_devinst *mi, uint64_t offset)
 {
+	uint32_t status;
 	/* XXX Handle configuration space changes */
 
 	switch (offset) {
 	case VIRTIO_MMIO_STATUS:
-		status = read_config(mi->mi_mmio, VIRTIO_MMIO_STATUS);
+		status = 0;
 		handle_status(mi, status);
 		break;
 
 	default:
-		errx("Invalid offset %lx\n", offset);
+		errx(EXIT_FAILURE, "Invalid offset %lx\n", offset);
 
 	}
 }
 
-void
-bounce_handler(int kq, struct mmio_devemu *mi)
+static void
+bounce_handler(int kq, struct mmio_devinst *mi)
 {
 	struct kevent kev;
 	int ret;
@@ -123,12 +127,13 @@ bounce_handler(int kq, struct mmio_devemu *mi)
 	pthread_exit(NULL);
 }
 
-int main(int argc, char *argv[]) 
+/* XXX Pass arguments for specifying a device. */
+int main(void)
 {
 	struct kevent kev;
-	pthread_t init;
 	char *mmio;
 	int kq, fd;
+	int error;
 	int ret;
 
 	/* XXX Specify type of device from command line*/
@@ -163,9 +168,9 @@ int main(int argc, char *argv[])
 	}
 
 	/* XXX TEMP */
-	struct mmio_devemu mi;
-	dev.mi_d = &mmio_de_vblk;
-	strncpy(dev.mi_name, "vtbd-emu", sizeof("vtlblk-emu"));
+	struct mmio_devinst mi;
+	//mi.mi_d = &mmio_de_vblk;
+	strncpy(mi.mi_name, "vtbd-emu", sizeof("vtlblk-emu"));
 	mi.mi_mmio = mmio;
 	mi.mi_size = MMIO_REGION_SIZE;
 	mi.mi_fd = fd;

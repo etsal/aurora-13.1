@@ -58,7 +58,7 @@ struct vtmmio_softc {
 int vtmmio_probe(device_t);
 int vtmmio_attach(device_t);
 
-#endif _KERNEL
+#endif /* _KERNEL */
 
 #define	VIRTIO_MMIO_MAGIC_VALUE		0x000
 #define	VIRTIO_MMIO_VERSION		0x004

@@ -1,12 +1,13 @@
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/uio.h>
 
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include </usr/src/sys/dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
 
+#include "debug.h"
 #include "iov_emul.h"
 #include "mmio_emul.h"
 #include "virtio.h"
@@ -32,7 +33,7 @@ iove_alloc(void)
 void
 iove_free(struct iov_emul *iove)
 {
-	int i;
+	size_t i;
 
 	for (i = 0; i < iove->iove_ind; i++)
 		free(iove->iove_tf[i].vtbt_device);
@@ -42,7 +43,7 @@ iove_free(struct iov_emul *iove)
 
 
 int
-iove_add(struct iov_emul *iove, caddr_t phys, size_t len, struct iovec *iovp)
+iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov)
 {
 	struct virtio_bounce_transfer *tf = iove->iove_tf;
 	char *base;
@@ -61,12 +62,12 @@ iove_add(struct iov_emul *iove, caddr_t phys, size_t len, struct iovec *iovp)
 		return (ENOMEM);
 
 	iove->iove_tf[iove->iove_ind].vtbt_device = base;
-	iove->iove_tf[iove->iove_ind].vtbt_driver = phys;
+	iove->iove_tf[iove->iove_ind].vtbt_driver = (caddr_t) phys;
 	iove->iove_tf[iove->iove_ind].vtbt_len = len;
 	iove->iove_ind += 1;
 
-	iovp->iov_base = base;
-	iovp->iov_len = len;
+	iov->iov_base = base;
+	iov->iov_len = len;
 
 	return (0);
 }

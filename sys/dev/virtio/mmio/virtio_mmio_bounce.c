@@ -426,19 +426,37 @@ virtio_bounce_ack(struct vtbounce_softc *sc)
 static int
 virtio_bounce_io(struct virtio_bounce_io_args *args)
 {
+	struct virtio_bounce_transfer *tf;
+	caddr_t driver, device;
 	int error = 0;
+	size_t len;
 	int i;
 
+	tf = malloc(args->cnt * sizeof(*tf), M_DEVBUF, M_NOWAIT);
+	if (tf == NULL)
+		return (ENOMEM);
+
+	error = copyin(args->transfers, tf, args->cnt * (sizeof(*tf)));
+	if (error != 0) {
+		free(tf, M_DEVBUF);
+		return (error);
+	}
+
 	for (i = 0; i < args->cnt; i++) {
+		driver = tf[i].vtbt_driver;
+		device = tf[i].vtbt_device;
+		len = tf[i].vtbt_len;
 
 		if (args->touser)
-			error = copyout(iov->driver[i], iov->device[i], iov->lens);
+			error = copyout(device, driver, len);
 		else
-			error = copyin(iov->device[i], iov->driver[i], iov->lens);
+			error = copyin(driver, device, len);
 
 		if (error != 0)
 			break;
 	}
+
+	free(tf, M_DEVBUF);
 
 	return (error);
 }
@@ -469,7 +487,7 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, stru
 	case VIRTIO_BOUNCE_ACK:
 		virtio_bounce_ack(sc);
 		break;
-	case VIRTIO_BOUNCE_IO:
+	case VIRTIO_BOUNCE_TRANSFER:
 		ret = virtio_bounce_io((struct virtio_bounce_io_args *)data);
 		break;
 	}

@@ -34,8 +34,7 @@
 #include <sys/ioctl.h>
 #include <sys/disk.h>
 
-#include <machine/vmm_snapshot.h>
-
+#include <stdbool.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -48,9 +47,11 @@
 #include <pthread.h>
 #include <md5.h>
 
-#include "bhyverun.h"
+#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+
 #include "config.h"
 #include "debug.h"
+#include "mmio_emul.h"
 #include "virtio.h"
 #include "block_if.h"
 
@@ -88,8 +89,7 @@ _Static_assert(VTBLK_RINGSZ <= BLOCKIF_RING_MAX, "Each ring entry must be able t
   ( VTBLK_F_SEG_MAX  |						    \
     VTBLK_F_BLK_SIZE |						    \
     VTBLK_F_FLUSH    |						    \
-    VTBLK_F_TOPOLOGY |						    \
-    )
+    VTBLK_F_TOPOLOGY )
     /* XXX Reactivate */
 //    VIRTIO_RING_F_INDIRECT_DESC )	/* indirect descriptors */
 
@@ -506,16 +506,18 @@ mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
 	mmio_set_cfgdata32(mi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
 	mmio_set_cfgdata32(mi, VIRTIO_MMIO_VERSION, 0x2);
 	mmio_set_cfgdata32(mi, VIRTIO_MMIO_DEVICE_ID, VIRTIO_DEV_BLOCK);
-	mmio_set_cfgdata(mi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
+	mmio_set_cfgdata32(mi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
 
 	/* XXX Decide what we do with this. */
+	/*
 	if (vi_intr_init(&sc->vbsc_vs, 1, fbsdrun_virtio_msix())) {
 		blockif_close(sc->bc);
 		free(sc);
 		return (1);
 	}
 	vi_set_io_bar(&sc->vbsc_vs, 0);
-	blockif_register_resize_callback(sc->bc, _vtblk_resized, sc);
+	*/
+	blockif_register_resize_callback(sc->bc, mmio_vtblk_resized, sc);
 	return (0);
 }
 
@@ -542,10 +544,9 @@ mmio_vtblk_cfgread(void *vsc, int offset, int size, uint32_t *retval)
 
 
 static const struct mmio_devemu mmio_de_vblk = {
-	.pe_emu =	"virtio-blk",
-	.pe_init =	mmio_vtblk_init,
-	.pe_legacy_config = blockif_legacy_config,
-	.pe_barwrite =	vi_mmio_write,
-	.pe_barread =	vi_mmio_read,
+	.me_emu =	"virtio-blk",
+	.me_init =	mmio_vtblk_init,
+	.me_write =	vi_mmio_write,
+	.me_read =	vi_mmio_read,
 };
 MMIO_EMUL_SET(mmio_de_vblk);

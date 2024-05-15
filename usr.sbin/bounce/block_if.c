@@ -58,7 +58,6 @@
 #include "config.h"
 #include "debug.h"
 #include "mevent.h"
-#include "pci_emul.h"
 #include "block_if.h"
 
 #define BLOCKIF_SIG	0xb109b109
@@ -442,6 +441,8 @@ blockif_init(void)
 	(void) signal(SIGCONT, SIG_IGN);
 }
 
+/* XXX Hardcode a config for the block interface. */
+#if 0
 int
 blockif_legacy_config(nvlist_t *nvl, const char *opts)
 {
@@ -460,6 +461,7 @@ blockif_legacy_config(nvlist_t *nvl, const char *opts)
 	free(path);
 	return (pci_parse_legacy_config(nvl, cp + 1));
 }
+#endif
 
 struct blockif_ctxt *
 blockif_open(nvlist_t *nvl, const char *ident)

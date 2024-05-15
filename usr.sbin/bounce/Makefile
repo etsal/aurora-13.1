@@ -1,9 +1,31 @@
-# XXX Temporary till we hook this into the kernel build system
+.include <src.opts.mk>
 
-all: bounce
+PROG=	bounce
+PACKAGE=	bounce
 
-bounce: bounce.c
-	$(CC) -Wall -O0 -lpthread -o bounce bounce.c pci_virtio_block.c
+BHYVE_SYSDIR?=${SRCTOP}
 
-clean:
-	rm -f bounce *.o
+.PATH:	${SRCTOP}/sys/libkern		\
+	${SRCTOP}/sys/cam/ctl
+
+SRCS=	block_if.c \
+	bounce.c \
+	config.c \
+	iov.c \
+	iov_emul.c \
+	mevent.c \
+	mmio_virtio_block.c \
+	virtio.c
+
+CFLAGS+=-I${.CURDIR}		\
+	-I${SRCTOP}/sys
+
+LIBADD+= md nv pthread z util 
+
+# Disable thread safety analysis since it only finds very simple bugs and
+# yields many false positives.
+NO_WTHREAD_SAFETY=
+
+NO_WCAST_ALIGN=
+
+.include <bsd.prog.mk>

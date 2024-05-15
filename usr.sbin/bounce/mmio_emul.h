@@ -37,6 +37,27 @@
 
 #include <assert.h>
 
+enum mmio_devstate {
+	MIDEV_INVALID,
+	MIDEV_ACKNOWLEDGED,
+	MIDEV_DRIVER_FOUND,
+	MIDEV_FEATURES_OK,
+	MIDEV_LIVE,
+	MIDEV_FAILED,
+	MIDEV_DEVICE_STATES,
+};
+
+struct mmio_devinst {
+	struct mmio_devemu 	*mi_d;
+	char	  		mi_name[FILENAME_MAX];	/* XXX Change to be device type - independent */
+	char 	  		*mi_mmio;	/* Memory mapped region */
+	size_t	  		mi_size;	/* Size of region in bytes */
+	int			mi_fd;		/* File descriptor for the region. */
+	enum mmio_devstate	mi_state;	
+
+	void      *mi_arg;		/* devemu-private data */
+};
+
 struct mmio_devemu {
 	const char      *me_emu;	/* Name of device emulation */
 
@@ -50,29 +71,13 @@ struct mmio_devemu {
 	int	(*me_cfgread)(struct mmio_devinst *mi, int offset,
 			      int bytes, uint32_t *retval);
 
+	void      (*me_write)(struct mmio_devinst *mi, uint64_t offset,
+				int size, uint32_t value);
+	uint64_t  (*me_read)(struct mmio_devinst *mi, uint64_t offset,
+				int size);
+
 };
 #define MMIO_EMUL_SET(x)   DATA_SET(mmio_devemu_set, x)
-
-enum mmio_devstate {
-	MIDEV_INVALID,
-	MIDEV_ACKNOWLEDGED,
-	MIDEV_DRIVER_FOUND,
-	MIDEV_FEATURES_OK,
-	MIDEV_LIVE,
-	MIDEV_FAILED,
-	MIDEV_DEVICE_STATES,
-};
-
-struct mmio_devinst {
-	struct mmio_devemu 	*mi_d;
-	char	  		mi_name[PATH_MAX];	/* XXX Change to make more general */
-	char 	  		*mi_mmio;	/* Memory mapped region */
-	size_t	  		mi_size;	/* Size of region in bytes */
-	void 	  		mi_fd;		/* File descriptor for the region. */
-	enum mmio_devstate;	mi_state;	
-
-	void      *mi_arg;		/* devemu-private data */
-};
 
 static __inline void
 mmio_set_cfgdata8(struct mmio_devinst *mi, int offset, uint8_t val)
@@ -101,13 +106,13 @@ mmio_get_cfgdata8(struct mmio_devinst *mi, int offset)
 static __inline uint16_t
 mmio_get_cfgdata16(struct mmio_devinst *mi, int offset)
 {
-	return letoh16((*(uint16_t *)(mi->mi_mmio + offset)));
+	return le16toh((*(uint16_t *)(mi->mi_mmio + offset)));
 }
 
 static __inline uint32_t
 mmio_get_cfgdata32(struct mmio_devinst *mi, int offset)
 {
-	return letoh16((*(uint32_t *)(mi->mi_mmio + offset)));
+	return le32toh((*(uint32_t *)(mi->mi_mmio + offset)));
 }
 
 #endif /* _MMIO_EMUL_H_ */

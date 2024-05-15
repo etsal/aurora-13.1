@@ -28,16 +28,20 @@
  */
 
 #include <sys/param.h>
+#include <sys/ioctl.h>
 #include <sys/uio.h>
 
-#include <machine/atomic.h>
-
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <pthread_np.h>
 
+#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+
+#include "debug.h"
 #include "iov_emul.h"
 #include "mmio_emul.h"
 #include "virtio.h"
@@ -110,18 +114,18 @@ vi_reset_dev(struct virtio_softc *vs)
  * The guest just gave us a page frame number, from which we can
  * calculate the addresses of the queue.
  */
-static void
-vi_vq_init(struct virtio_softc *vs, uint32_t pfn)
+/* XXX Find where this was originally called. */
+static void __unused
+vi_vq_init(struct virtio_softc *vs)
 {
 	struct vqueue_info *vq;
-	uint64_t phys;
-	size_t size;
+	/* XXX */
+	//size_t size;
 	char *base;
 
 	vq = &vs->vs_queues[vs->vs_curq];
-	vq->vq_pfn = pfn;
-	phys = (uint64_t)pfn << VRING_PFN;
-	size = vring_size_aligned(vq->vq_qsize);
+	/* XXX Find out how this was originally used. */
+	//size = vring_size_aligned(vq->vq_qsize);
 	base = vs->vs_mi->mi_mmio;
 
 	/* First page(s) are descriptors... */
@@ -160,12 +164,12 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 	 * Preallocate a descriptor data region for the descriptor
 	 */
 	if ((vd->flags & VRING_DESC_F_WRITE) == 0) {
-		if (iove_add(vq->vq_readio, vd->len, &iov) != 0)
+		if (iove_add(vq->vq_readio, vd->addr, vd->len, iov) != 0)
 			return;
 
 		reqp->readable++; 
 	} else {
-		if (iove_add(vq->vq_writeio, vd->len, &iov) != 0)
+		if (iove_add(vq->vq_writeio, vd->addr, vd->len, iov) != 0)
 			return;
 
 		reqp->writable++;
@@ -173,8 +177,8 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 }
 #define	VQ_MAX_DESCRIPTORS	512	/* see below */
 
-int
-vq_import_indirect()
+static int
+vq_import_indirect(struct vring_desc __unused **vdp)
 {
 	/* XXX Use the PFN to make a single IO. */
 	assert(0);
@@ -306,7 +310,9 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 				goto error;
 			}
 
-			vindir = vq_import_indirect();
+			error = vq_import_indirect(&vindir);
+			if (error != 0)
+				goto error;
 			/*
 			 * Indirects start at the 0th, then follow
 			 * their own embedded "next"s until those run
@@ -351,18 +357,20 @@ error:
 	iove_free(vq->vq_readio);
 	iove_free(vq->vq_writeio);
 	vq->vq_readio = vq->vq_writeio = NULL;
-	free(vindir);
+	/* XXX Reactivate once we handle indirect descriptors. */
+	//free(vindir);
 
 	return (-1);
 
 done:
 	/* Read in readable descriptors from the kernel. */
-	error = iove_import(vs, vq->readio);
+	error = iove_import(vs, vq->vq_readio);
 
-	free(vindir);
+	/* XXX Reactivate once we handle indirect descriptors. */
+	//free(vindir);
 
 	if (error != 0) {
-		EPRINTLN("Reading in data failed with %d", data);
+		EPRINTLN("Reading in data failed with %d", error);
 		return (-1);
 	}
 
@@ -513,7 +521,7 @@ static struct config_reg {
 	uint8_t		cr_ro;		/* true => reg is read only */
 	const char	*cr_name;	/* name of reg */
 } config_regs[] = {
-	{ VIRTIO_MMIO_MAGIC_VALUE, MMIO_MAGIC_VALUE" },		
+	{ VIRTIO_MMIO_MAGIC_VALUE, 	  4, 1,"MMIO_MAGIC_VALUE" },		
 	{ VIRTIO_MMIO_VERSION,		  4, 1, "VERSION" },		
 	{ VIRTIO_MMIO_DEVICE_ID, 	  4, 1, "DEVICE_ID" },		
 	{ VIRTIO_MMIO_VENDOR_ID, 	  4, 1, "VENDOR_ID" },		
@@ -540,7 +548,8 @@ static struct config_reg {
 
 
 static inline struct config_reg *
-vi_find_cr(int offset) {
+vi_find_cr(int offset)
+{
 	u_int hi, lo, mid;
 	struct config_reg *cr;
 
@@ -560,23 +569,23 @@ vi_find_cr(int offset) {
 }
 
 uint64_t
-vi_mmio_read(struct mmio_devinst *mi, uint64_t offset, int size)
+vi_mmio_read(struct mmio_devinst __unused *mi, uint64_t __unused offset, int __unused size)
 {
-	DPRINTF(("virtio: attempt to read MMIO at %lu", offset));
+	EPRINTLN("virtio: attempt to read MMIO at %lu", offset);
 	return (1);
 }
 
 void
-vi_pci_write(struct pci_devinst *pi, uint64_t offset, int size,
-    uint64_t value)
+vi_mmio_write(struct mmio_devinst *mi, uint64_t offset, int size,
+    uint32_t value)
 {
-	struct virtio_softc *vs = pi->pi_arg;
-	struct vqueue_info *vq;
+	struct virtio_softc *vs = mi->mi_arg;
+	//struct vqueue_info *vq;
 	struct virtio_consts *vc;
 	struct config_reg *cr;
-	uint64_t virtio_config_size, max;
 	const char *name;
 	uint32_t newoff;
+	uint64_t max;
 	int error;
 
 	if (vs->vs_mtx)
@@ -591,7 +600,7 @@ vi_pci_write(struct pci_devinst *pi, uint64_t offset, int size,
 
 	/* If writing in the config space, */
 	if (offset >= VIRTIO_MMIO_CONFIG) {
-		newoff = offset - virtio_config_size;
+		newoff = offset - VIRTIO_MMIO_CONFIG;
 		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mi->mi_size - VIRTIO_MMIO_CONFIG);
 		if (newoff + size > max)
 			goto bad;
@@ -653,7 +662,7 @@ bad:
 	}
 	goto done;
 
-bad_qindex:
+//bad_qindex:
 	EPRINTLN(
 	    "%s: write config reg %s: curq %d >= max %d",
 	    name, cr->cr_name, vs->vs_curq, vc->vc_nvq);
