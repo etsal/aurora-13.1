@@ -39,11 +39,11 @@ mmio_emul.h (<-  pci_emul.h)
 mmio_virtio_block.c (<- pci_virtio_block.c)
 	-> Turn off indirect descriptors
 	-> Removed snapshotting functions
-	-> [HACK] Turn off vtblk_resized
 	-> vtblk_init: Remove boot device-related code
 	-> Change device name
 	-> Change cfgdata handling
 	-> Remove vi_intr_init
+	-> [HACK] Fix up block resizing
 
 virtio.c
 	-> vi_reset_dev() heavily modified

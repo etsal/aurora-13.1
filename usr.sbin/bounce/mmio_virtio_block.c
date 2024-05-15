@@ -398,8 +398,11 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 
 	sc->vbsc_cfg.vbc_capacity = new_size / VTBLK_BSIZE; /* 512-byte units */
 	/* XXX Handle resizing. */
+	/* XXX Update the status register to be an interrupt */
+	/* XXX Mark a config change. */
+	/* XXX Hit the interrupt. */
 	printf("UNIMPLEMENTED RESIZE\n");
-	exit(1);
+	assert(0);
 }
 
 static int
