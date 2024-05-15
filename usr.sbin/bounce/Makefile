@@ -1,9 +1,4 @@
-.include <src.opts.mk>
-
 PROG=	bounce
-PACKAGE=	bounce
-
-BHYVE_SYSDIR?=${SRCTOP}
 
 .PATH:	${SRCTOP}/sys/libkern		\
 	${SRCTOP}/sys/cam/ctl
@@ -17,10 +12,12 @@ SRCS=	block_if.c \
 	mmio_virtio_block.c \
 	virtio.c
 
+MAN=
+
 CFLAGS+=-I${.CURDIR}		\
 	-I${SRCTOP}/sys
 
-LIBADD+= md nv pthread z util 
+LIBADD+= md nv pthread 
 
 # Disable thread safety analysis since it only finds very simple bugs and
 # yields many false positives.
