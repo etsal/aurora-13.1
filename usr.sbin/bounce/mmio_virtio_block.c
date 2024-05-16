@@ -398,10 +398,12 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 	sc = arg;
 
 	sc->vbsc_cfg.vbc_capacity = new_size / VTBLK_BSIZE; /* 512-byte units */
-	/* XXX Handle resizing. */
-	/* XXX Update the status register to be an interrupt */
-	/* XXX Mark a config change. */
-	/* XXX Hit the interrupt. */
+	/* XXX Handle resizing: 
+	 *
+	 * - Update the status register to be an interrupt .
+	 * - Mark a config change. 
+	 * - Hit the interrupt. 
+	 */
 	printf("UNIMPLEMENTED RESIZE\n");
 	assert(0);
 }
@@ -414,9 +416,7 @@ mmio_vtblk_event(int fd, enum ev_type type, void *arg)
 	assert(fd == mdi->mi_fd);
 	assert(type == EVF_READ);
 
-	/* XXX FIX */
-	assert(0);
-	vi_mmio_write(mdi, sizeof(uint32_t), 0, 0);
+	vi_mmio_write(mdi);
 	
 	/* Let in-progress operations continue.  */
 	ioctl(mdi->mi_fd, VIRTIO_BOUNCE_ACK);
@@ -472,10 +472,6 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	sc->vbsc_vq.vq_qsize = VTBLK_RINGSZ;
 	/* XXX sc->vbsc_vq.vq_notify = we have no per-queue notify */
 
-	/* 
-	 * XXX Create enough of an environment for the code below to succeed. 
-	 * Do this from main().
-	 */
 	/*
 	 * If an explicit identifier is not given, create an
 	 * identifier using parts of the md5 sum of the filename.
@@ -529,8 +525,8 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
 
 	mevent_add(mdi->mi_fd, EVF_READ, mmio_vtblk_event, sc);
-
 	blockif_register_resize_callback(sc->bc, mmio_vtblk_resized, sc);
+
 	return (0);
 }
 

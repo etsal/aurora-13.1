@@ -64,7 +64,7 @@
  */
 void
 vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
-		void *dev_softc, struct mmio_devinst *mi,
+		void *dev_softc, struct mmio_devinst *mdi,
 		struct vqueue_info *queues)
 {
 	int i;
@@ -72,8 +72,8 @@ vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 	/* vs and dev_softc addresses must match */
 	assert((void *)vs == dev_softc);
 	vs->vs_vc = vc;
-	vs->vs_mi = mi;
-	mi->mi_arg = vs;
+	vs->vs_mi = mdi;
+	mdi->mi_arg = vs;
 
 	vs->vs_queues = queues;
 	for (i = 0; i < vc->vc_nvq; i++) {
@@ -92,7 +92,7 @@ vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 void
 vi_reset_dev(struct virtio_softc *vs)
 {
-	struct mmio_devinst *mi = vs->vs_mi;
+	struct mmio_devinst *mdi = vs->vs_mi;
 	struct vqueue_info *vq;
 	int i, nvq;
 
@@ -110,9 +110,9 @@ vi_reset_dev(struct virtio_softc *vs)
 	vs->vs_negotiated_caps = 0;
 	vs->vs_curq = 0;
 
-	mi->mi_state = MIDEV_INVALID;
-	mmio_set_cfgdata32(mi, VIRTIO_MMIO_INTERRUPT_STATUS, 0);
-	mmio_set_cfgdata32(mi, VIRTIO_MMIO_QUEUE_READY, 0);
+	mdi->mi_state = MIDEV_INVALID;
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_INTERRUPT_STATUS, 0);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_READY, 0);
 
 }
 
@@ -525,33 +525,32 @@ vq_endchains(struct vqueue_info *vq, int used_all_avail)
 /* Note: these are in sorted order to make for a fast search */
 static struct config_reg {
 	uint16_t	cr_offset;	/* register offset */
-	uint8_t		cr_size;	/* size (bytes) */
 	uint8_t		cr_ro;		/* true => reg is read only */
 	const char	*cr_name;	/* name of reg */
 } config_regs[] = {
-	{ VIRTIO_MMIO_MAGIC_VALUE, 	  4, 1,"MMIO_MAGIC_VALUE" },		
-	{ VIRTIO_MMIO_VERSION,		  4, 1, "VERSION" },		
-	{ VIRTIO_MMIO_DEVICE_ID, 	  4, 1, "DEVICE_ID" },		
-	{ VIRTIO_MMIO_VENDOR_ID, 	  4, 1, "VENDOR_ID" },		
-	{ VIRTIO_MMIO_HOST_FEATURES, 	  4, 1, "HOST_FEATURES" },		
-	{ VIRTIO_MMIO_HOST_FEATURES_SEL,  4, 0, "HOST_FEATURES_SEL" },		
-	{ VIRTIO_MMIO_GUEST_FEATURES, 	  4, 0, "GUEST_FEATURES" },		
-	{ VIRTIO_MMIO_GUEST_FEATURES_SEL, 4, 0, "GUEST_FEATURES_SEL" },  
-	{ VIRTIO_MMIO_QUEUE_SEL, 	  4, 0, "QUEUE_SEL" },		
-	{ VIRTIO_MMIO_QUEUE_NUM_MAX, 	  4, 1, "QUEUE_NUM_MAX" },		
-	{ VIRTIO_MMIO_QUEUE_NUM, 	  4, 0, "QUEUE_NUM" },		
-	{ VIRTIO_MMIO_QUEUE_READY, 	  4, 0, "QUEUE_READY" },
-	{ VIRTIO_MMIO_QUEUE_NOTIFY, 	  4, 0, "QUEUE_NOTIFY" },		
-	{ VIRTIO_MMIO_INTERRUPT_STATUS,   4, 1, "INTERRUPT_STATUS" },		
-	{ VIRTIO_MMIO_INTERRUPT_ACK, 	  4, 0, "INTERRUPT_ACK" },		
-	{ VIRTIO_MMIO_STATUS,		  4, 0, "STATUS" },		
-	{ VIRTIO_MMIO_QUEUE_DESC_LOW, 	  4, 0, "QUEUE_DESC_LOW" },		
-	{ VIRTIO_MMIO_QUEUE_DESC_HIGH, 	  4, 0, "QUEUE_DESC_HIGH" },		
-	{ VIRTIO_MMIO_QUEUE_AVAIL_LOW, 	  4, 0, "QUEUE_AVAIL_LOW" },		
-	{ VIRTIO_MMIO_QUEUE_AVAIL_HIGH,   4, 0, "QUEUE_AVAIL_HIGH" },		
-	{ VIRTIO_MMIO_QUEUE_USED_LOW, 	  4, 0, "QUEUE_USED_LOW" },		
-	{ VIRTIO_MMIO_QUEUE_USED_HIGH, 	  4, 0, "QUEUE_USED_HIGH" },		
-	{ VIRTIO_MMIO_CONFIG_GENERATION,  4, 1, "CONFIG_GENERATION" },		
+	{ VIRTIO_MMIO_MAGIC_VALUE, 	  1,"MMIO_MAGIC_VALUE" },		
+	{ VIRTIO_MMIO_VERSION,		  1, "VERSION" },		
+	{ VIRTIO_MMIO_DEVICE_ID, 	  1, "DEVICE_ID" },		
+	{ VIRTIO_MMIO_VENDOR_ID, 	  1, "VENDOR_ID" },		
+	{ VIRTIO_MMIO_HOST_FEATURES, 	  1, "HOST_FEATURES" },		
+	{ VIRTIO_MMIO_HOST_FEATURES_SEL,  0, "HOST_FEATURES_SEL" },		
+	{ VIRTIO_MMIO_GUEST_FEATURES, 	  0, "GUEST_FEATURES" },		
+	{ VIRTIO_MMIO_GUEST_FEATURES_SEL, 0, "GUEST_FEATURES_SEL" },  
+	{ VIRTIO_MMIO_QUEUE_SEL, 	  0, "QUEUE_SEL" },		
+	{ VIRTIO_MMIO_QUEUE_NUM_MAX, 	  1, "QUEUE_NUM_MAX" },		
+	{ VIRTIO_MMIO_QUEUE_NUM, 	  0, "QUEUE_NUM" },		
+	{ VIRTIO_MMIO_QUEUE_READY, 	  0, "QUEUE_READY" },
+	{ VIRTIO_MMIO_QUEUE_NOTIFY, 	  0, "QUEUE_NOTIFY" },		
+	{ VIRTIO_MMIO_INTERRUPT_STATUS,   1, "INTERRUPT_STATUS" },		
+	{ VIRTIO_MMIO_INTERRUPT_ACK, 	  0, "INTERRUPT_ACK" },		
+	{ VIRTIO_MMIO_STATUS,		  0, "STATUS" },		
+	{ VIRTIO_MMIO_QUEUE_DESC_LOW, 	  0, "QUEUE_DESC_LOW" },		
+	{ VIRTIO_MMIO_QUEUE_DESC_HIGH, 	  0, "QUEUE_DESC_HIGH" },		
+	{ VIRTIO_MMIO_QUEUE_AVAIL_LOW, 	  0, "QUEUE_AVAIL_LOW" },		
+	{ VIRTIO_MMIO_QUEUE_AVAIL_HIGH,   0, "QUEUE_AVAIL_HIGH" },		
+	{ VIRTIO_MMIO_QUEUE_USED_LOW, 	  0, "QUEUE_USED_LOW" },		
+	{ VIRTIO_MMIO_QUEUE_USED_HIGH, 	  0, "QUEUE_USED_HIGH" },		
+	{ VIRTIO_MMIO_CONFIG_GENERATION,  1, "CONFIG_GENERATION" },		
 };
 
 static inline struct config_reg *
@@ -574,42 +573,96 @@ vi_find_cr(int offset) {
 	return (NULL);
 }
 
-uint64_t
-vi_mmio_read(struct mmio_devinst __unused *mi, uint64_t __unused offset, int __unused size)
+static void
+vi_handle_state_change(struct mmio_devinst *mdi, uint32_t status)
 {
-	EPRINTLN("virtio: attempt to read MMIO at %lu", offset);
-	return (1);
+	switch (mdi->mi_state) {
+	case MIDEV_INVALID:
+		if (status & VIRTIO_CONFIG_STATUS_ACK)
+			mdi->mi_state = MIDEV_ACKNOWLEDGED;
+		break;
+
+	case MIDEV_ACKNOWLEDGED:
+		if (status & VIRTIO_CONFIG_STATUS_DRIVER)
+			mdi->mi_state = MIDEV_DRIVER_FOUND;
+		break;
+
+	case MIDEV_DRIVER_FOUND:
+		if (status & VIRTIO_CONFIG_S_FEATURES_OK)
+			mdi->mi_state = MIDEV_FEATURES_OK;
+		break;
+
+	case MIDEV_FEATURES_OK:
+		if (status & VIRTIO_CONFIG_STATUS_DRIVER_OK)
+			mdi->mi_state = MIDEV_LIVE;
+
+		break;
+
+	case MIDEV_LIVE:
+		break;
+
+	case MIDEV_FAILED:
+		mdi->mi_state = MIDEV_FAILED;
+		break;
+
+	default:
+		EPRINTLN("invalid device state %d", mdi->mi_state);
+		exit(1);
+	}
+}
+
+static void
+vi_handle_status(struct mmio_devinst *mdi, uint32_t status)
+{
+	if (status & VIRTIO_CONFIG_STATUS_FAILED) {
+		mdi->mi_state = MIDEV_FAILED;
+		return;
+	}
+
+	if (status & VIRTIO_CONFIG_STATUS_RESET) {
+		/* XXX Call a device reset. */
+		//vi_reset_dev();
+		mdi->mi_state = MIDEV_INVALID;
+		return;
+	}
+
+	vi_handle_state_change(mdi, status);
 }
 
 void
-vi_mmio_write(struct mmio_devinst *mi, uint64_t offset, int size,
-    uint32_t value)
+vi_mmio_write(struct mmio_devinst *mdi)
 {
-	struct virtio_softc *vs = mi->mi_arg;
+	/* Reported writes are always 32-bit. */
+	const int size = 4; 
+
+	struct virtio_softc *vs = mdi->mi_arg;
 	//struct vqueue_info *vq;
 	struct virtio_consts *vc;
 	struct config_reg *cr;
 	const char *name;
 	uint32_t newoff;
+	int32_t value;
 	uint64_t max;
 	int error;
 
 	if (vs->vs_mtx)
 		pthread_mutex_lock(vs->vs_mtx);
 
+	/* XXX Read in the offset somehow. */
+	uint64_t offset = 0;
+
 	vc = vs->vs_vc;
 	name = vc->vc_name;
-
-	if (size != 1 && size != 2 && size != 4)
-		goto bad;
-
 
 	/* If writing in the config space, */
 	if (offset >= VIRTIO_MMIO_CONFIG) {
 		newoff = offset - VIRTIO_MMIO_CONFIG;
-		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mi->mi_bytes - VIRTIO_MMIO_CONFIG);
+		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mdi->mi_bytes - VIRTIO_MMIO_CONFIG);
 		if (newoff + size > max)
 			goto bad;
+
+		value = *(uint32_t *)&mdi->mi_addr[offset];
+
 		if (vc->vc_cfgwrite != NULL)
 			error = (*vc->vc_cfgwrite)(MIDEV_SOFTC(vs), newoff, size, value);
 		else
@@ -620,27 +673,25 @@ vi_mmio_write(struct mmio_devinst *mi, uint64_t offset, int size,
 
 bad:
 	cr = vi_find_cr(offset);
-	if (cr == NULL || cr->cr_size != size || cr->cr_ro) {
+	if (cr == NULL || cr->cr_ro) {
 		if (cr != NULL) {
-			/* offset must be OK, wrong size and/or reg is R/O */
-			if (cr->cr_size != size)
-				EPRINTLN(
-				    "%s: write to %s: bad size %d",
-				    name, cr->cr_name, size);
+			/* offset must be OK, and reg is R/O */
 			if (cr->cr_ro)
 				EPRINTLN(
 				    "%s: write to read-only reg %s",
 				    name, cr->cr_name);
 		} else {
 			EPRINTLN(
-			    "%s: write to bad offset/size %jd/%d",
-			    name, (uintmax_t)offset, size);
+			    "%s: write to bad offset %jd",
+			    name, (uintmax_t)offset);
 		}
 		goto done;
 	}
 
-	/* XXX Implement for MMIO. */
-	switch (offset) {
+	/* Read in the data from the common area. */
+	value = *(uint32_t *)&mdi->mi_addr[cr->cr_offset];
+
+	switch (cr->cr_offset) {
 	case VIRTIO_MMIO_HOST_FEATURES_SEL:  		
 		printf("%s:%d Unimplemented\n", __func__, __LINE__);
 		exit(1);
@@ -662,8 +713,7 @@ bad:
 		exit(1);
 		break;
 	case VIRTIO_MMIO_STATUS:		    
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
+		vi_handle_status(mdi, value);
 		break;
 	}
 

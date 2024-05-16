@@ -164,7 +164,9 @@ vring_size_aligned(u_int qsz)
 struct mmio_devinst;
 struct vqueue_info;
 
-/* XXX Clean this up further as we go. */
+/*
+ * XXX Remove any unused fields.
+ */
 struct virtio_softc {
 	struct virtio_consts *vs_vc;	/* constants (see below) */
 	int	vs_flags;		/* VIRTIO_* flags from above */
@@ -337,7 +339,5 @@ void	vq_relchain_publish(struct vqueue_info *vq);
 void	vq_relchain(struct vqueue_info *vq, uint16_t idx, uint32_t iolen);
 void	vq_endchains(struct vqueue_info *vq, int used_all_avail);
 
-uint64_t vi_mmio_read(struct mmio_devinst *mi, uint64_t offset, int size);
-void	vi_mmio_write(struct mmio_devinst *mi, uint64_t offset, int size,
-	uint32_t value);
+void	vi_mmio_write(struct mmio_devinst *mi);
 #endif	/* _BHYVE_VIRTIO_H_ */
