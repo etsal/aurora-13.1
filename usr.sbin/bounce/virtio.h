@@ -128,38 +128,6 @@
 #define VRING_ALIGN	4096
 
 /*
- * The address of any given virtual queue is determined by a single
- * Page Frame Number register.  The guest writes the PFN into the
- * PCI config space.  However, a device that has two or more
- * virtqueues can have a different PFN, and size, for each queue.
- * The number of queues is determinable via the PCI config space
- * VTCFG_R_QSEL register.  Writes to QSEL select the queue: 0 means
- * queue #0, 1 means queue#1, etc.  Once a queue is selected, the
- * remaining PFN and QNUM registers refer to that queue.
- *
- * QNUM is a read-only register containing a nonzero power of two
- * that indicates the (hypervisor's) queue size.  Or, if reading it
- * produces zero, the hypervisor does not have a corresponding
- * queue.  (The number of possible queues depends on the virtual
- * device.  The block device has just one; the network device
- * provides either two -- 0 = receive, 1 = transmit -- or three,
- * with 2 = control.)
- *
- * PFN is a read/write register giving the physical page address of
- * the virtqueue in guest memory (the guest must allocate enough space
- * based on the hypervisor's provided QNUM).
- *
- * QNOTIFY is effectively write-only: when the guest writes a queue
- * number to the register, the hypervisor should scan the specified
- * virtqueue. (Reading QNOTIFY currently always gets 0).
- */
-
-/*
- * PFN register shift amount
- */
-#define	VRING_PFN		12
-
-/*
  * PCI vendor/device IDs
  */
 #define	VIRTIO_VENDOR		0x1AF4
@@ -354,7 +322,6 @@ struct vi_req {
 	unsigned int idx;	/* ring index */
 };
 
-/* XXX These four functions must be adapted for the virtio transport. */
 void	vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 			void *dev_softc, struct mmio_devinst *mi,
 			struct vqueue_info *queues);

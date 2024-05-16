@@ -1,28 +1,21 @@
-#include <sys/mman.h>
-
-#include <endian.h>
 #include <err.h>
-#include <fcntl.h>
-#include <pthread.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sysexits.h>
 #include <unistd.h>
 
-#include <sys/event.h>
-
-#include <dev/virtio/virtio.h>
-#include <dev/virtio/mmio/virtio_mmio.h>
-#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
-
+#include "config.h"
+#include "debug.h"
+#include "mevent.h"
 #include "mmio_emul.h"
 
-#define BOUNCEDEV ("/dev/virtio_bounce")
 
-/* XXX We currently hardcode how large the region is. */
-#define MMIO_REGION_SIZE (1024 * 1024 * 10)
-
+#if 0
+/*==========================================================*/
+/* XXX Move to virtio.c */
 static void
 handle_state_change(struct mmio_devinst *mi, uint32_t status)
 {
@@ -79,7 +72,6 @@ handle_status(struct mmio_devinst *mi, uint32_t status)
 	handle_state_change(mi, status);
 }
 
-/* XXX Set up init_mmio_vtblk() */
 /* XXX Use vi_mmio_write as a main loop instead. */
 static void
 handle_mmio(struct mmio_devinst *mi, uint64_t offset)
@@ -98,90 +90,89 @@ handle_mmio(struct mmio_devinst *mi, uint64_t offset)
 
 	}
 }
+/*==========================================================*/
+#endif
 
 static void
-bounce_handler(int kq, struct mmio_devinst *mi)
+bounce_usage(int code)
 {
-	struct kevent kev;
-	int ret;
+	const char *progname;
 
-	for (;;) {
-		ret = kevent(kq, NULL, 0, &kev, 1, NULL);
-		if (ret == -1) {
-			perror("kevent");
-			exit(1);
-		}
+	progname = getprogname();
 
-		if (ret == 0)
-			continue;
-
-		if (kev.flags & EV_ERROR)
-			errx(EXIT_FAILURE, "kevent: %s",  strerror(kev.data));
-
-		handle_mmio(mi, kev.data);
-
-		/* Let in-progress operations continue.  */
-		ioctl(mi->mi_fd, VIRTIO_BOUNCE_ACK);
-	}
-
-	pthread_exit(NULL);
+	fprintf(stderr,
+	    "Usage: %s [-hot]\n"
+	    "       -h: help\n"
+	    "       -o: set config 'var' to 'value'\n"
+	    "       -t: MMIO device type\n",
+	    progname);
+	exit(code);
 }
 
-/* XXX Pass arguments for specifying a device. */
-int main(void)
+static bool
+bounce_parse_config_option(const char *option)
 {
-	struct kevent kev;
-	char *mmio;
-	int kq, fd;
-	int error;
-	int ret;
+	const char *value;
+	char *path;
 
-	/* XXX Specify type of device from command line*/
-	/* XXX Get the name, look into the list of all available device.
-	 * If we do not find it, return. Otherwise, return the device struct. 
-	 */
+	value = strchr(option, '=');
+	if (value == NULL || value[1] == '\0')
+		return (false);
+	path = strndup(option, value - option);
+	if (path == NULL)
+		err(4, "Failed to allocate memory");
+	set_config_value(path, value + 1);
+	return (true);
+}
 
-	fd = open(BOUNCEDEV, O_RDWR);
-	if (fd == -1) {
-		perror("open");
-		exit(1);
+
+static void
+bounce_optparse(int argc, char **argv)
+{
+	const char *optstr;
+	int c;
+
+	optstr = "ho:t:";
+	while ((c = getopt(argc, argv, optstr)) != -1) {
+		switch (c) {
+		case 't':
+			if (strncmp(optarg, "help", strlen(optarg)) == 0) {
+				mmio_print_supported_devices();
+				exit(0);
+			} else if (mmio_parse_device(optarg) != 0)
+				exit(4);
+			else
+				break;
+		case 'o':
+			if (!bounce_parse_config_option(optarg)) {
+				errx(EX_USAGE,
+				    "invalid configuration option '%s'",
+				    optarg);
+			}
+			break;
+		case 'h':
+			bounce_usage(0);
+		default:
+			bounce_usage(1);
+		}
 	}
+}
 
-	mmio = mmap(NULL, MMIO_REGION_SIZE, PROT_READ | PROT_WRITE,
-			MAP_FILE | MAP_SHARED, fd, 0);
-	if (mmio == MAP_FAILED) {
-		perror("mmap");
-		pthread_exit(NULL);
+int
+main(int argc, char *argv[])
+{
+	init_config();
+	bounce_optparse(argc, argv);
+
+	/* Exit if a device emulation finds an error in its initialization */
+	if (init_mmio() != 0) {
+		EPRINTLN("Device emulation initialization error: %s",
+		    strerror(errno));
+		exit(4);
 	}
+	
+	/* Head off to the main event dispatch loop. */
+	mevent_dispatch();
 
-	kq = kqueue();
-	if (kq == -1) {
-		perror("kqueue");
-		exit(1);
-	}
-
-	EV_SET(&kev, fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, NULL);
-	ret = kevent(kq, &kev, 1, NULL, 0, NULL);
-	if (ret == -1) {
-		perror("kevent");
-		exit(1);
-	}
-
-	/* XXX TEMP */
-	struct mmio_devinst mi;
-	//mi.mi_d = &mmio_de_vblk;
-	strncpy(mi.mi_name, "vtbd-emu", sizeof("vtlblk-emu"));
-	mi.mi_mmio = mmio;
-	mi.mi_size = MMIO_REGION_SIZE;
-	mi.mi_fd = fd;
-
-	error = ioctl(fd, VIRTIO_BOUNCE_INIT);
-	if (error < 0) {
-		perror("ioctl");
-		exit(1);
-	}
-
-
-	bounce_handler(kq, &mi);
-
+	exit(4);
 }

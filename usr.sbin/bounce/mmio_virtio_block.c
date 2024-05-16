@@ -51,6 +51,7 @@
 
 #include "config.h"
 #include "debug.h"
+#include "mevent.h"
 #include "mmio_emul.h"
 #include "virtio.h"
 #include "block_if.h"
@@ -405,8 +406,24 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 	assert(0);
 }
 
+static void
+mmio_vtblk_event(int fd, enum ev_type type, void *arg)
+{
+	struct mmio_devinst *mdi = (struct mmio_devinst *)arg;
+
+	assert(fd == mdi->mi_fd);
+	assert(type == EVF_READ);
+
+	/* XXX FIX */
+	assert(0);
+	vi_mmio_write(mdi, sizeof(uint32_t), 0, 0);
+	
+	/* Let in-progress operations continue.  */
+	ioctl(mdi->mi_fd, VIRTIO_BOUNCE_ACK);
+}
+
 static int
-mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
+mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 {
 	char bident[PATH_MAX];
 	struct blockif_ctxt *bctxt;
@@ -421,7 +438,7 @@ mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
 	 * The supplied backing file has to exist
 	 */
 	/* Make sure the name fits */
-	snprintf(bident, sizeof(bident), "%s", mi->mi_name);
+	snprintf(bident, sizeof(bident), "%s", mdi->mi_name);
 	bctxt = blockif_open(nvl, bident);
 	if (bctxt == NULL) {
 		perror("Could not open backing file");
@@ -449,11 +466,11 @@ mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
 	pthread_mutex_init(&sc->vsc_mtx, NULL);
 
 	/* init virtio softc and virtqueues */
-	vi_softc_linkup(&sc->vbsc_vs, &sc->vbsc_consts, sc, mi, &sc->vbsc_vq);
+	vi_softc_linkup(&sc->vbsc_vs, &sc->vbsc_consts, sc, mdi, &sc->vbsc_vq);
 	sc->vbsc_vs.vs_mtx = &sc->vsc_mtx;
 
 	sc->vbsc_vq.vq_qsize = VTBLK_RINGSZ;
-	/* sc->vbsc_vq.vq_notify = we have no per-queue notify */
+	/* XXX sc->vbsc_vq.vq_notify = we have no per-queue notify */
 
 	/* 
 	 * XXX Create enough of an environment for the code below to succeed. 
@@ -506,20 +523,13 @@ mmio_vtblk_init(struct mmio_devinst *mi, nvlist_t *nvl)
 	sc->vbsc_cfg.discard_sector_alignment = MAX(sectsz, sts) / VTBLK_BSIZE;
 
 	/* XXX Make sure we do not need to set up anything else*/
-	mmio_set_cfgdata32(mi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
-	mmio_set_cfgdata32(mi, VIRTIO_MMIO_VERSION, 0x2);
-	mmio_set_cfgdata32(mi, VIRTIO_MMIO_DEVICE_ID, VIRTIO_DEV_BLOCK);
-	mmio_set_cfgdata32(mi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VERSION, 0x2);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_DEVICE_ID, VIRTIO_DEV_BLOCK);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
 
-	/* XXX Decide what we do with this. */
-	/*
-	if (vi_intr_init(&sc->vbsc_vs, 1, fbsdrun_virtio_msix())) {
-		blockif_close(sc->bc);
-		free(sc);
-		return (1);
-	}
-	vi_set_io_bar(&sc->vbsc_vs, 0);
-	*/
+	mevent_add(mdi->mi_fd, EVF_READ, mmio_vtblk_event, sc);
+
 	blockif_register_resize_callback(sc->bc, mmio_vtblk_resized, sc);
 	return (0);
 }
@@ -549,7 +559,5 @@ mmio_vtblk_cfgread(void *vsc, int offset, int size, uint32_t *retval)
 static const struct mmio_devemu mmio_de_vblk = {
 	.me_emu =	"virtio-blk",
 	.me_init =	mmio_vtblk_init,
-	.me_write =	vi_mmio_write,
-	.me_read =	vi_mmio_read,
 };
 MMIO_EMUL_SET(mmio_de_vblk);

@@ -10,6 +10,7 @@ SRCS=	block_if.c \
 	iov_emul.c \
 	mevent.c \
 	mmio_virtio_block.c \
+	mmio_emul.c \
 	virtio.c
 
 MAN=

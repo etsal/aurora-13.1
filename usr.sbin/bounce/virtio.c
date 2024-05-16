@@ -137,8 +137,8 @@ vi_vq_init(struct virtio_softc *vs)
 	 * XXX Do we even need to memory map the control block?
 	 */
 	vq = &vs->vs_queues[vs->vs_curq];
-	size = vring_size_aligned(vq->vq_qsize);
-	base = vs->vs_mi->mi_mmio;
+	//size = vring_size_aligned(vq->vq_qsize);
+	base = vs->vs_mi->mi_addr;
 
 	/* First page(s) are descriptors... */
 	vq->vq_desc = (struct vring_desc *)base;
@@ -607,7 +607,7 @@ vi_mmio_write(struct mmio_devinst *mi, uint64_t offset, int size,
 	/* If writing in the config space, */
 	if (offset >= VIRTIO_MMIO_CONFIG) {
 		newoff = offset - VIRTIO_MMIO_CONFIG;
-		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mi->mi_size - VIRTIO_MMIO_CONFIG);
+		max = vc->vc_cfgsize ? vc->vc_cfgsize : (mi->mi_bytes - VIRTIO_MMIO_CONFIG);
 		if (newoff + size > max)
 			goto bad;
 		if (vc->vc_cfgwrite != NULL)
@@ -666,6 +666,7 @@ bad:
 		exit(1);
 		break;
 	}
+
 	goto done;
 
 //bad_qindex:
@@ -673,6 +674,7 @@ bad:
 	    "%s: write config reg %s: curq %d >= max %d",
 	    name, cr->cr_name, vs->vs_curq, vc->vc_nvq);
 done:
+
 	if (vs->vs_mtx)
 		pthread_mutex_unlock(vs->vs_mtx);
 }
