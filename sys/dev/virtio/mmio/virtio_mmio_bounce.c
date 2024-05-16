@@ -84,6 +84,7 @@ struct vtbounce_softc {
 	vm_object_t		vtb_object;
 	vm_ooffset_t		vtb_baseaddr;
 	size_t			vtb_bytes;
+	size_t			vtb_allocated;
 
 	virtqueue_intr_t	*vtb_intr;
 	void			*vtb_intr_arg;
@@ -224,16 +225,34 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 	vm_object_t obj = sc->vtb_object;
 	size_t bytes = IDX_TO_OFF(obj->size);
 	vm_offset_t baseaddr;
+	vm_page_t m;
 	int error;
+
+	/*
+	 * XXX Do not allow mapping twice.
+	 */
+
+	VTBOUNCE_WARN("\n");
+	vm_object_reference(obj);
+
+	/* 
+	 * Populate the object with physically contiguous pages, because
+	 * the object is used to back the virtqueue descriptor regions.
+	 */
+	m = vm_page_alloc_contig(obj, 0, VM_ALLOC_NORMAL, obj->size,
+			0, (uint64_t) -1, 1, 0, VM_MEMATTR_DEFAULT);
+	if (m == NULL) {
+		vm_object_deallocate(obj);
+		return (ENOMEM);
+	}
+
+	VTBOUNCE_WARN("\n");
 
 #ifdef __amd64__
 	baseaddr = KERNBASE;
 #else
 	baseaddr = VM_MIN_KERNEL_ADDRESS;
 #endif
-
-	VTBOUNCE_WARN("\n");
-	vm_object_reference(obj);
 
 	VTBOUNCE_WARN("\n");
 	error = vm_map_find(kernel_map, obj, 0, &baseaddr, bytes, 0,
@@ -303,6 +322,7 @@ virtio_bounce_open(struct cdev *cdev, int oflags, int devtype, struct thread *td
 	mtx_init(&sc->vtb_mtx, "vtbounce", NULL, MTX_DEF);
 	knlist_init_mtx(&sc->vtb_note, &sc->vtb_mtx);
 				
+	/* vm_page_alloc_contig_domain */
 	sc->vtb_object = vm_pager_allocate(OBJT_PHYS, NULL, sz, VM_PROT_ALL,
 			0, thread0.td_ucred);
 	if (sc->vtb_object == NULL) {
@@ -349,6 +369,26 @@ virtio_bounce_mmap_single(struct cdev *cdev, vm_ooffset_t *offset,
 	return (0);
 }
 
+static void *
+virtio_bounce_ringalloc(device_t dev, size_t size)
+{
+	struct vtbounce_softc *sc = vtmmio_get_vtb(dev);
+	void *mem;
+
+	mtx_lock(&sc->vtb_mtx);
+	if (sc->vtb_allocated + size > sc->vtb_bytes) {
+		mtx_unlock(&sc->vtb_mtx);
+		return (NULL);
+	}
+	
+	mem = (void *)(sc->vtb_baseaddr + sc->vtb_allocated);
+	sc->vtb_baseaddr += size;
+
+	mtx_unlock(&sc->vtb_mtx);
+
+	return (mem);
+}
+
 /* Create the virtio device. */
 static int
 virtio_bounce_init(void)
@@ -381,7 +421,10 @@ virtio_bounce_init(void)
 	/* Have the device and cdev be able to refer to each other. */
 	mmiosc = device_get_softc(child);
 	mmiosc->vtmb_bounce = vtbsc;
+	mmiosc->vtmb_mmio.vtmmio_ringalloc_cb = virtio_bounce_ringalloc;
 	vtbsc->vtb_dev = child;
+
+	/* Ring buffer allocation callback. */
 
 	mtx_unlock(&vtbsc->vtb_mtx);
 	VTBOUNCE_WARN("\n");

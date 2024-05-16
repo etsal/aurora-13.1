@@ -362,7 +362,7 @@ vtpci_alloc_virtqueues(struct vtpci_common *cn, int nvqs,
 		notify_offset = vtpci_get_vq_notify_off(cn, idx);
 
 		error = virtqueue_alloc(dev, idx, size, notify_offset, align,
-		    ~(vm_paddr_t)0, info, &vq);
+		    ~(vm_paddr_t)0, info, &vq, NULL);
 		if (error) {
 			device_printf(dev,
 			    "cannot allocate virtqueue %d: %d\n", idx, error);

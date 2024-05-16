@@ -151,7 +151,8 @@ SDT_PROBE_DEFINE1(virtqueue, , enqueue_segments, return, "uint16_t");
 int
 virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size,
     bus_size_t notify_offset, int align, vm_paddr_t highaddr,
-    struct vq_alloc_info *info, struct virtqueue **vqp)
+    struct vq_alloc_info *info, struct virtqueue **vqp,
+    virtqueue_alloc_cb_t alloc_cb)
 {
 	struct virtqueue *vq;
 	int error;
@@ -206,8 +207,12 @@ virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size,
 	}
 
 	vq->vq_ring_size = round_page(vring_size(size, align));
-	vq->vq_ring_mem = contigmalloc(vq->vq_ring_size, M_DEVBUF,
-	    M_NOWAIT | M_ZERO, 0, highaddr, PAGE_SIZE, 0);
+	if (alloc_cb != NULL) {
+		vq->vq_ring_mem = alloc_cb(dev, vq->vq_ring_size);
+	} else {
+		vq->vq_ring_mem = contigmalloc(vq->vq_ring_size, M_DEVBUF,
+			M_NOWAIT | M_ZERO, 0, highaddr, PAGE_SIZE, 0);
+	}
 	if (vq->vq_ring_mem == NULL) {
 		device_printf(dev,
 		    "cannot allocate memory for virtqueue ring\n");

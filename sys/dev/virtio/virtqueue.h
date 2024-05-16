@@ -34,6 +34,7 @@ struct sglist;
 
 /* Device callback for a virtqueue interrupt. */
 typedef void virtqueue_intr_t(void *);
+typedef void *virtqueue_alloc_cb_t(device_t, size_t);
 
 /*
  * Hint on how long the next interrupt should be postponed. This is
@@ -67,7 +68,8 @@ struct vq_alloc_info {
 
 int	 virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size,
 	     bus_size_t notify_offset, int align, vm_paddr_t highaddr,
-	     struct vq_alloc_info *info, struct virtqueue **vqp);
+	     struct vq_alloc_info *info, struct virtqueue **vqp,
+	     virtqueue_alloc_cb_t *cb);
 void	*virtqueue_drain(struct virtqueue *vq, int *last);
 void	 virtqueue_free(struct virtqueue *vq);
 int	 virtqueue_reinit(struct virtqueue *vq, uint16_t size);

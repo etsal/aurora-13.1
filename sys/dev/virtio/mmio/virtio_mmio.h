@@ -36,6 +36,7 @@
 DECLARE_CLASS(vtmmio_driver);
 
 struct vtmmio_virtqueue;
+typedef void *vtmmio_alloc_cb_t(device_t, size_t);
 
 struct vtmmio_softc {
 	device_t			dev;
@@ -53,6 +54,8 @@ struct vtmmio_softc {
 	int				vtmmio_nvqs;
 	struct vtmmio_virtqueue		*vtmmio_vqs;
 	void				*ih;
+
+	vtmmio_alloc_cb_t		*vtmmio_ringalloc_cb;
 };
 
 int vtmmio_probe(device_t);
