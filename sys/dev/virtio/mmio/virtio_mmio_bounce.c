@@ -144,9 +144,36 @@ vtmmio_bounce_attach(device_t dev)
 static int
 vtmmio_bounce_note(device_t dev, size_t offset, int val)
 {
-	struct vtbounce_softc *sc;
+	struct vtbounce_softc *vtbsc;
+	struct vtmmio_bounce_softc *sc;
+	uint32_t value;
+
+	sc = device_get_softc(dev);
+	vtbsc = sc->vtmb_bounce;
 
 	VTBOUNCE_WARN("\n");
+
+	/*
+	 * Intercept writes to the QUEUE_{DESC, AVAIL, USED}_{HIGH, LOW} 
+	 * registers and instead pass to the user the offset from the beginning 
+	 * of the control region. Do not actually notify userspace of the writes,
+	 * it will be notified once we set VIRTIO_MMIO_QUEUE_READY.
+	 */
+	switch (offset) {
+	case VIRTIO_MMIO_QUEUE_DESC_HIGH:
+	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
+	case VIRTIO_MMIO_QUEUE_USED_HIGH:
+		value = (val - vtophys(vtbsc->vtb_baseaddr)) >> 32;
+		bus_write_4(sc->vtmb_mmio.res[0], offset, value);
+		return (1);
+
+	case VIRTIO_MMIO_QUEUE_DESC_LOW:
+	case VIRTIO_MMIO_QUEUE_AVAIL_LOW:
+	case VIRTIO_MMIO_QUEUE_USED_LOW:
+		value = val - vtophys(vtbsc->vtb_baseaddr);
+		bus_write_4(sc->vtmb_mmio.res[0], offset, value);
+		return (1);
+	}
 
 	/* Only forward the listed register writes to userspace. */
 	switch (offset) {
@@ -162,16 +189,13 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 		return (1);
 	}
 
-	VTBOUNCE_WARN("\n");
-	sc = vtmmio_get_vtb(dev);
+	mtx_lock(&vtbsc->vtb_mtx);
+	vtbsc->vtb_offset = offset;
+	KNOTE_LOCKED(&vtbsc->vtb_note, PRIBIO);
 
-	mtx_lock(&sc->vtb_mtx);
-	sc->vtb_offset = offset;
-	KNOTE_LOCKED(&sc->vtb_note, PRIBIO);
+	msleep(vtbsc, &vtbsc->vtb_mtx, PRIBIO, "vtmmionote", 0);
 
-	msleep(sc, &sc->vtb_mtx, PRIBIO, "vtmmionote", 0);
-
-	mtx_unlock(&sc->vtb_mtx);
+	mtx_unlock(&vtbsc->vtb_mtx);
 
 
 	return (1);

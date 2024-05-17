@@ -48,7 +48,7 @@ mmio_emul_control_init(struct mmio_devinst *mdi)
 		return (-1);
 	}
 
-	mmio = mmap(NULL, MMIO_VQ_SIZE, PROT_READ | PROT_WRITE,
+	mmio = mmap(NULL, MMIO_TOTAL_SIZE, PROT_READ | PROT_WRITE,
 			MAP_FILE | MAP_SHARED, fd, 0);
 	if (mmio == MAP_FAILED) {
 		EPRINTLN("Control device mapping error: %s",
@@ -61,14 +61,14 @@ mmio_emul_control_init(struct mmio_devinst *mdi)
 	if (error < 0) {
 		EPRINTLN("Control device initialization error: %s",
 		    strerror(errno));
-		munmap(mmio, MMIO_VQ_SIZE);
+		munmap(mmio, MMIO_TOTAL_SIZE);
 		close(fd);
 		return (-1);
 	}
 
 	mdi->mi_fd = fd;
 	mdi->mi_addr = mmio;
-	mdi->mi_bytes = MMIO_VQ_SIZE;
+	mdi->mi_bytes = MMIO_TOTAL_SIZE;
 	return (0);
 }
 

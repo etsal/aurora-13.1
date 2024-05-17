@@ -164,9 +164,6 @@ vring_size_aligned(u_int qsz)
 struct mmio_devinst;
 struct vqueue_info;
 
-/*
- * XXX Remove any unused fields.
- */
 struct virtio_softc {
 	struct virtio_consts *vs_vc;	/* constants (see below) */
 	int	vs_flags;		/* VIRTIO_* flags from above */
@@ -175,7 +172,6 @@ struct virtio_softc {
 	uint32_t vs_negotiated_caps;	/* negotiated capabilities */
 	struct vqueue_info *vs_queues;	/* one per vc_nvq */
 	int	vs_curq;		/* current queue */
-	uint8_t	vs_status;		/* value from last status write */
 };
 
 #define	VS_LOCK(vs)							\
@@ -237,13 +233,13 @@ struct vqueue_info {
 	uint16_t vq_last_avail;	/* a recent value of vq_avail->idx */
 	uint16_t vq_next_used;	/* index of the next used slot to be filled */
 	uint16_t vq_save_used;	/* saved vq_used->idx; see vq_endchains */
-	uint16_t vq_msix_idx;	/* MSI-X index, or VIRTIO_MSI_NO_VECTOR */
 
-	uint32_t vq_pfn;	/* PFN of virt queue (not shifted!) */
+	uint32_t vq_offset;	/* Offset in the control region */
 
 	struct vring_desc *vq_desc;	/* descriptor array */
 	struct vring_avail *vq_avail;	/* the "avail" ring */
 	struct vring_used *vq_used;	/* the "used" ring */
+
 	struct iov_emul	*vq_readio;	/* emulated MMIO read IO vector */
 	struct iov_emul	*vq_writeio;	/* emulated MMIO write IO vector */
 
@@ -339,5 +335,5 @@ void	vq_relchain_publish(struct vqueue_info *vq);
 void	vq_relchain(struct vqueue_info *vq, uint16_t idx, uint32_t iolen);
 void	vq_endchains(struct vqueue_info *vq, int used_all_avail);
 
-void	vi_mmio_write(struct mmio_devinst *mi);
+void	vi_mmio_write(struct virtio_softc *vs);
 #endif	/* _BHYVE_VIRTIO_H_ */

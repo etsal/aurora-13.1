@@ -411,12 +411,13 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 static void
 mmio_vtblk_event(int fd, enum ev_type type, void *arg)
 {
-	struct mmio_devinst *mdi = (struct mmio_devinst *)arg;
+	struct mmio_vtblk_softc *sc = (struct mmio_vtblk_softc *)arg;
+	struct mmio_devinst *mdi = sc->vbsc_vs.vs_mi;
 
 	assert(fd == mdi->mi_fd);
 	assert(type == EVF_READ);
 
-	vi_mmio_write(mdi);
+	vi_mmio_write(&sc->vbsc_vs);
 	
 	/* Let in-progress operations continue.  */
 	ioctl(mdi->mi_fd, VIRTIO_BOUNCE_ACK);

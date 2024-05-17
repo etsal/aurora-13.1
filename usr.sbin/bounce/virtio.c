@@ -73,7 +73,6 @@ vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 	assert((void *)vs == dev_softc);
 	vs->vs_vc = vc;
 	vs->vs_mi = mdi;
-	mdi->mi_arg = vs;
 
 	vs->vs_queues = queues;
 	for (i = 0; i < vc->vc_nvq; i++) {
@@ -105,7 +104,7 @@ vi_reset_dev(struct virtio_softc *vs)
 		vq->vq_last_avail = 0;
 		vq->vq_next_used = 0;
 		vq->vq_save_used = 0;
-		vq->vq_pfn = 0;
+		vq->vq_offset = UINT_MAX;
 	}
 	vs->vs_negotiated_caps = 0;
 	vs->vs_curq = 0;
@@ -121,38 +120,25 @@ vi_reset_dev(struct virtio_softc *vs)
  * The guest just gave us a page frame number, from which we can
  * calculate the addresses of the queue.
  */
-/* XXX Find where this was originally called. */
-static void __unused
-vi_vq_init(struct virtio_softc *vs)
+static void
+vi_vq_init(struct mmio_devinst *mdi, struct vqueue_info *vq)
 {
-	struct vqueue_info *vq;
-	/* XXX */
-	//size_t size;
-	char *base;
+	uint64_t offset;
 
-	/* XXX Make sure passing mi_mmio to the vq works. i
-	 * We should be explicitly initializing the control blcok
-	 * in the commonly mapped region.
-	 *
-	 * XXX Do we even need to memory map the control block?
-	 */
-	vq = &vs->vs_queues[vs->vs_curq];
-	//size = vring_size_aligned(vq->vq_qsize);
-	base = vs->vs_mi->mi_addr;
+	offset = mmio_get_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_DESC_HIGH);
+	offset <<= 32;
+	offset |= mmio_get_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_DESC_LOW);
+	vq->vq_desc = (struct vring_desc *)(mdi->mi_addr + offset);
 
-	/* First page(s) are descriptors... */
-	vq->vq_desc = (struct vring_desc *)base;
-	base += vq->vq_qsize * sizeof(struct vring_desc);
+	offset = mmio_get_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_AVAIL_HIGH);
+	offset <<= 32;
+	offset |= mmio_get_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_AVAIL_LOW);
+	vq->vq_avail = (struct vring_avail *)(mdi->mi_addr + offset);
 
-	/* ... immediately followed by "avail" ring (entirely uint16_t's) */
-	vq->vq_avail = (struct vring_avail *)base;
-	base += (2 + vq->vq_qsize + 1) * sizeof(uint16_t);
-
-	/* Then it's rounded up to the next page... */
-	base = (char *)roundup2((uintptr_t)base, VRING_ALIGN);
-
-	/* ... and the last page(s) are the used ring. */
-	vq->vq_used = (struct vring_used *)base;
+	offset = mmio_get_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_USED_HIGH);
+	offset <<= 32;
+	offset |= mmio_get_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_USED_LOW);
+	vq->vq_used = (struct vring_used *)(mdi->mi_addr + offset);
 
 	/* Mark queue as allocated, and start at 0 when we use it. */
 	vq->vq_flags = VQ_ALLOC;
@@ -160,6 +146,7 @@ vi_vq_init(struct virtio_softc *vs)
 	vq->vq_next_used = 0;
 	vq->vq_save_used = 0;
 }
+
 
 /*
  * Helper inline for vq_getchain(): record the i'th "real"
@@ -573,6 +560,7 @@ vi_find_cr(int offset) {
 	return (NULL);
 }
 
+/* XXX Send these to the mmio transport. */
 static void
 vi_handle_state_change(struct mmio_devinst *mdi, uint32_t status)
 {
@@ -612,43 +600,159 @@ vi_handle_state_change(struct mmio_devinst *mdi, uint32_t status)
 }
 
 static void
-vi_handle_status(struct mmio_devinst *mdi, uint32_t status)
+vi_handle_status(struct virtio_softc *vs, uint32_t status)
 {
+
+	struct mmio_devinst *mdi = vs->vs_mi;
 	if (status & VIRTIO_CONFIG_STATUS_FAILED) {
 		mdi->mi_state = MIDEV_FAILED;
 		return;
 	}
 
 	if (status & VIRTIO_CONFIG_STATUS_RESET) {
-		/* XXX Call a device reset. */
-		//vi_reset_dev();
 		mdi->mi_state = MIDEV_INVALID;
+		vi_reset_dev(vs);
 		return;
 	}
 
 	vi_handle_state_change(mdi, status);
 }
 
+static void
+vi_handle_queue_num(struct virtio_softc *vs)
+{
+	struct mmio_devinst *mdi = vs->vs_mi;
+	struct vqueue_info *vq;
+	int idx;
+
+	idx = mmio_get_cfgdata32(mdi->mi_addr, VIRTIO_MMIO_QUEUE_SEL);
+	if (idx < 0 || idx >= vs->vs_vc->vc_nvq) {
+		EPRINTLN("Selected queue %d, driver confused?", vs->vs_curq);
+		return;
+	}
+
+	vs->vs_curq = idx;
+
+	vq = &vs->vs_queues[vs->vs_curq];
+	if (!vq_ring_ready(vq)) {
+		vi_vq_init(mdi, vq);
+		return;
+	}
+	
+
+	/* XXX What does this call mean otherwise? */
+}
+
+static void
+vi_handle_queue_num(struct virtio_softc *vs)
+{
+	size_t qsize;
+
+	qsize = mmio_get_cfgdata32(mdi->mi_addr, VIRTIO_MMIO_QUEUE_NUM);
+	if (qsize > vq->vq_qsize || !powerof2(qsize)) {
+		EPRINTLN("QUEUE_NUM %d is invalid, driver confused?", size);
+		return;
+	}
+
+	vq->vq_qsize = qsize;
+}
+
+static void
+vi_handle_queue_ready(struct virtio_softc *vs, uint32_t ready)
+{
+	struct vqueue_info *vq = &vs->vs_queues[vs->vs_curq];
+	uint64_t size;
+	int qsize;
+
+	if (read > 1) {
+		EPRINTLN("QUEUE_READY has value %d, driver confused?", size);
+		return;
+	}
+
+	if (ready == 1 && !vq_ring_ready(vq)) {
+		vi_vq_init();
+		return;
+	}
+}
+
+static void
+vi_handle_queue_sel(struct virtio_softc *vs)
+{
+	struct vqueue_info *vq;
+
+	vs->vs_curq = mmio_get_cfgdata32(mdi->mi_addr, VIRTIO_MMIO_QUEUE_SEL);
+
+	if (vs->vs_curq < 0 || vs->vs_curq >= vs->vs_vc->vc_nvq) {
+		EPRINTLN("Selected queue %d, driver confused?", vs->vs_curq);
+		return;
+	}
+
+	vq = &vs->vs_queues[vs->vs_curq];
+	if (vq_ring_ready(vq))
+		return;
+
+	/* Part of virtqueue initialization. */
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_NUM_MAX, vq->vq_qsize << VRING_ALIGN);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_READY, 0);
+
+	return;
+}
+
+static void
+vi_handle_interrupt_ack(struct virtio_softc *vs, uint32_t ack)
+{
+	/* 
+	 * Follow the protocol even if we are executing the 
+	 * interrupt ourselves, so we are the ones that sent
+	 * the ACK from the kernel in the first place.
+	 */
+	if (ack != 1) {
+		EPRINTLN("INTERRUPT_ACK has value %d, "
+			"driver confused?", ack);
+		return;
+	}
+
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_INTERRUPT_ACK, 0);
+}
+
+
+static void
+vi_handle_guest_features(struct virtio_softc *vs, uint32_t features)
+{
+	struct mmio_devinst *mdi = vs->vs_mi;
+
+	/* Give them the high or low 32-bits of (what?)_*/
+	vs->vs_negotiated_caps = value & vc->vc_hv_caps;
+	if (vc->vc_apply_features)
+		(*vc->vc_apply_features)(DEV_SOFTC(vs),
+			vs->vs_negotiated_caps);
+
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_HOST_FEATURES, vc->vc_hv_caps);
+}
+
 void
-vi_mmio_write(struct mmio_devinst *mdi)
+vi_mmio_write(struct virtio_softc *vs)
 {
 	/* Reported writes are always 32-bit. */
 	const int size = 4; 
 
-	struct virtio_softc *vs = mdi->mi_arg;
-	//struct vqueue_info *vq;
 	struct virtio_consts *vc;
 	struct config_reg *cr;
 	const char *name;
 	uint32_t newoff;
 	int32_t value;
+	uint32_t caps;
 	uint64_t max;
 	int error;
+	bool hi;
 
 	if (vs->vs_mtx)
 		pthread_mutex_lock(vs->vs_mtx);
 
-	/* XXX Read in the offset somehow. */
+	/* 
+	 * XXX Read in the offset somehow.
+	 * Use part of the common region or an ioctl, since we can't use kevent.
+	 */
 	uint64_t offset = 0;
 
 	vc = vs->vs_vc;
@@ -661,7 +765,7 @@ vi_mmio_write(struct mmio_devinst *mdi)
 		if (newoff + size > max)
 			goto bad;
 
-		value = *(uint32_t *)&mdi->mi_addr[offset];
+		value = mmio_get_cfgdata32(mdi, offset);
 
 		if (vc->vc_cfgwrite != NULL)
 			error = (*vc->vc_cfgwrite)(MIDEV_SOFTC(vs), newoff, size, value);
@@ -673,56 +777,60 @@ vi_mmio_write(struct mmio_devinst *mdi)
 
 bad:
 	cr = vi_find_cr(offset);
-	if (cr == NULL || cr->cr_ro) {
-		if (cr != NULL) {
-			/* offset must be OK, and reg is R/O */
-			if (cr->cr_ro)
-				EPRINTLN(
-				    "%s: write to read-only reg %s",
-				    name, cr->cr_name);
-		} else {
-			EPRINTLN(
-			    "%s: write to bad offset %jd",
-			    name, (uintmax_t)offset);
-		}
+	if (cr == NULL)  {
+		EPRINTLN("%s: write to bad offset %jd",
+			name, (uintmax_t)offset);
+		goto done;
+
+	}
+
+	if (cr->cr_ro) {
+		EPRINTLN("%s: write to read-only reg %s",
+			name, cr->cr_name);
 		goto done;
 	}
 
-	/* Read in the data from the common area. */
-	value = *(uint32_t *)&mdi->mi_addr[cr->cr_offset];
+	value = mmio_get_cfgdata32(mdi, cr->cr_offset);
 
 	switch (cr->cr_offset) {
 	case VIRTIO_MMIO_HOST_FEATURES_SEL:  		
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
+		vi_handle_host_features_sel(vs, value);
 		break;
+
 	case VIRTIO_MMIO_GUEST_FEATURES: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
+		vi_handle_guest_features(vs, value);
 		break;
+
 	case VIRTIO_MMIO_QUEUE_SEL: 	    
+		vi_handle_queue_sel(vs);
+		break;
+
+	case VIRTIO_MMIO_QUEUE_NUM_MAX: 	    
+		vi_handle_queue_num_max(vs);
+		break;
+
+	case VIRTIO_MMIO_QUEUE_NUM:
+		vi_handle_queue_num(vs, value);
+		break;
+
+
+	case VIRTIO_MMIO_QUEUE_NOTIFY:
+		/* XXX The actual kicks from the device. */
 		printf("%s:%d Unimplemented\n", __func__, __LINE__);
 		exit(1);
 		break;
-	case VIRTIO_MMIO_QUEUE_NUM: 	    
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
-		break;
+
 	case VIRTIO_MMIO_INTERRUPT_ACK: 	    	
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
+		vi_handle_interrupt_ack(vs, value);
 		break;
+
 	case VIRTIO_MMIO_STATUS:		    
-		vi_handle_status(mdi, value);
+		vi_handle_status(vs, value);
 		break;
 	}
 
 	goto done;
 
-//bad_qindex:
-	EPRINTLN(
-	    "%s: write config reg %s: curq %d >= max %d",
-	    name, cr->cr_name, vs->vs_curq, vc->vc_nvq);
 done:
 
 	if (vs->vs_mtx)

@@ -46,18 +46,8 @@ struct mmio_devemu {
 
 	/* instance creation */
 	int       (*me_init)(struct mmio_devinst *, nvlist_t *);
-	const char *me_alias;
-
-	/* mmio space read/write callbacks */
-	int	(*me_cfgwrite)(struct mmio_devinst *mi, int offset,
-			       int bytes, uint32_t val);
-	int	(*me_cfgread)(struct mmio_devinst *mi, int offset,
-			      int bytes, uint32_t *retval);
-
-	void      (*me_write)(struct mmio_devinst *mi, uint64_t offset,
+	void      (*me_write)(struct mmio_devinst *mdi, uint64_t offset,
 				int size, uint32_t value);
-	uint64_t  (*me_read)(struct mmio_devinst *mi, uint64_t offset,
-				int size);
 };
 
 enum mmio_devstate {
@@ -77,54 +67,51 @@ struct mmio_devinst {
 	size_t	  		mi_bytes;	/* Size of region in bytes */
 	int			mi_fd;		/* File descriptor for the region. */
 	enum mmio_devstate	mi_state;	
-
-	void      		*mi_arg;	/* devemu-private data */
 };
 #define MMIO_EMUL_SET(x)   DATA_SET(mmio_devemu_set, x)
 
 /* XXX Determine this more elegantly. */
-#define MMIO_VQ_SIZE (1024 * 1024 * 10)
+#define MMIO_TOTAL_SIZE (1024 * 1024 * 10)
 #define MMIO_CTRDEV ("/dev/virtio_bounce")
-
 
 int init_mmio(void);
 void mmio_print_supported_devices(void);
 int mmio_parse_device(char *opt);
 
 static __inline void
-mmio_set_cfgdata8(struct mmio_devinst *mi, int offset, uint8_t val)
+mmio_set_cfgdata8(struct mmio_devinst *mdi, int offset, uint8_t val)
 {
-	*(uint8_t *)(mi->mi_addr + offset) = val;
+	*(uint8_t *)(mdi->mi_addr + offset) = val;
 }
 
 static __inline void
-mmio_set_cfgdata16(struct mmio_devinst *mi, int offset, uint16_t val)
+mmio_set_cfgdata16(struct mmio_devinst *mdi, int offset, uint16_t val)
 {
-	*(uint16_t *)(mi->mi_addr + offset) = htole16(val);
+	*(uint16_t *)(mdi->mi_addr + offset) = htole16(val);
 }
 
 static __inline void
-mmio_set_cfgdata32(struct mmio_devinst *mi, int offset, uint32_t val)
+mmio_set_cfgdata32(struct mmio_devinst *mdi, int offset, uint32_t val)
 {
-	*(uint32_t *)(mi->mi_addr + offset) = htole32(val);
+	*(uint32_t *)(mdi->mi_addr + offset) = htole32(val);
 }
 
 static __inline uint8_t
-mmio_get_cfgdata8(struct mmio_devinst *mi, int offset)
+mmio_get_cfgdata8(struct mmio_devinst *mdi, int offset)
 {
-	return (*(uint8_t *)(mi->mi_addr + offset));
+	return (*(uint8_t *)(mdi->mi_addr + offset));
 }
 
 static __inline uint16_t
-mmio_get_cfgdata16(struct mmio_devinst *mi, int offset)
+mmio_get_cfgdata16(struct mmio_devinst *mdi, int offset)
 {
-	return le16toh((*(uint16_t *)(mi->mi_addr + offset)));
+	return le16toh((*(uint16_t *)(mdi->mi_addr + offset)));
 }
 
 static __inline uint32_t
-mmio_get_cfgdata32(struct mmio_devinst *mi, int offset)
+mmio_get_cfgdata32(struct mmio_devinst *mdi, int offset)
 {
-	return le32toh((*(uint32_t *)(mi->mi_addr + offset)));
+	return le32toh((*(uint32_t *)(mdi->mi_addr + offset)));
 }
 
 #endif /* _MMIO_EMUL_H_ */
