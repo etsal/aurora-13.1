@@ -115,43 +115,25 @@ mmio_emul_init(struct mmio_devemu *mde, nvlist_t *nvl)
 }
 
 int
-mmio_parse_device(char *opt)
+mmio_parse_device(nvlist_t *nvl, char *opt)
 {
-	char node_name[sizeof("mmio")];
 	struct mmio_devemu *mde;
-	char *emul, *config, *str, *cp;
-	nvlist_t *nvl;
-	int error;
-
-	error = -1;
-	str = strdup(opt);
-
-	emul = str;
-	config = NULL;
-	if ((cp = strchr(str, ',')) == NULL)
-		return (EINVAL);
-
-	*cp = '\0';
-	config = cp + 1;
+	char *emul = opt;
 
 	mde = mmio_emul_finddev(emul);
 	if (mde == NULL) {
-		EPRINTLN("unknown mmio device %s:%s\n", emul, config);
-		goto done;
+		EPRINTLN("unknown mmio device %s\n", emul);
+		return (EINVAL);
 	}
 
-	nvl = find_config_node(node_name);
-	if (nvl != NULL) {
-		EPRINTLN("mmio slot %s already occupied!", node_name);
-		goto done;
+	if (get_config_value_node(nvl, "devtype") != NULL) {
+		EPRINTLN("device type already defined!");
+		return (EINVAL);
 	}
 
-	nvl = create_config_node(node_name);
-	set_config_value_node(nvl, "device", mde->me_emu);
+	set_config_value_node(nvl, "devtype", mde->me_emu);
 
-done:
-	free(str);
-	return (error);
+	return (0);
 }
 
 
@@ -167,29 +149,14 @@ mmio_print_supported_devices(void)
 }
 
 int
-init_mmio(void)
+init_mmio(nvlist_t *nvl)
 {
-	char node_name[sizeof("mmio")];
 	struct mmio_devemu *mde;
-	nvlist_t *nvl;
 	const char *emul;
 
-	nvl = find_config_node(node_name);
-	if (nvl == NULL) {
-		/* XXX error handling */
-		assert(0);
-	}
-
-	snprintf(node_name, sizeof(node_name), "mmio");
-	nvl = find_config_node(node_name);
-	if (nvl == NULL) {
-		EPRINTLN("mmio namespace not found");
-		return (EINVAL);
-	}
-
-	emul = get_config_value_node(nvl, "device");
+	emul = get_config_value_node(nvl, "devtype");
 	if (emul == NULL) {
-		EPRINTLN("mmio device missing device value");
+		EPRINTLN("mmio device missing devtype value");
 		return (EINVAL);
 	}
 

@@ -29,27 +29,31 @@ bounce_usage(int code)
 }
 
 static bool
-bounce_parse_config_option(const char *option)
+bounce_parse_config_option(nvlist_t *nvl, const char *option)
 {
-	const char *value;
-	char *path;
+	const char *key;
+	char *value;
 
+	key = option;
 	value = strchr(option, '=');
 	if (value == NULL || value[1] == '\0')
 		return (false);
-	path = strndup(option, value - option);
-	if (path == NULL)
-		err(4, "Failed to allocate memory");
-	set_config_value(path, value + 1);
+
+	*value = '\0';
+
+	set_config_value_node(nvl, key, value + 1);
 	return (true);
 }
 
 
-static void
+static nvlist_t *
 bounce_optparse(int argc, char **argv)
 {
 	const char *optstr;
+	nvlist_t *nvl;
 	int c;
+
+	nvl = create_config_node("device");
 
 	optstr = "ho:t:";
 	while ((c = getopt(argc, argv, optstr)) != -1) {
@@ -58,12 +62,12 @@ bounce_optparse(int argc, char **argv)
 			if (strncmp(optarg, "help", strlen(optarg)) == 0) {
 				mmio_print_supported_devices();
 				exit(0);
-			} else if (mmio_parse_device(optarg) != 0)
+			} else if (mmio_parse_device(nvl, optarg) != 0)
 				exit(4);
 			else
 				break;
 		case 'o':
-			if (!bounce_parse_config_option(optarg)) {
+			if (!bounce_parse_config_option(nvl, optarg)) {
 				errx(EX_USAGE,
 				    "invalid configuration option '%s'",
 				    optarg);
@@ -75,16 +79,20 @@ bounce_optparse(int argc, char **argv)
 			bounce_usage(1);
 		}
 	}
+
+	return (nvl);
 }
 
 int
 main(int argc, char *argv[])
 {
+	nvlist_t *nvl;
+
 	init_config();
-	bounce_optparse(argc, argv);
+	nvl = bounce_optparse(argc, argv);
 
 	/* Exit if a device emulation finds an error in its initialization */
-	if (init_mmio() != 0) {
+	if (init_mmio(nvl) != 0) {
 		EPRINTLN("Device emulation initialization error: %s",
 		    strerror(errno));
 		exit(4);

@@ -74,9 +74,9 @@ struct mmio_devinst {
 #define MMIO_TOTAL_SIZE (1024 * 1024 * 10)
 #define MMIO_CTRDEV ("/dev/virtio_bounce")
 
-int init_mmio(void);
+int init_mmio(nvlist_t *nvl);
 void mmio_print_supported_devices(void);
-int mmio_parse_device(char *opt);
+int mmio_parse_device(nvlist_t *nvl, char *opt);
 
 static __inline void
 mmio_set_cfgdata8(struct mmio_devinst *mdi, int offset, uint8_t val)
