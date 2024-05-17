@@ -56,7 +56,7 @@
  * front of virtio-based device softc" constraint, let's use
  * this to convert.
  */
-#define	MIDEV_SOFTC(vs) ((void *)(vs))
+#define	DEV_SOFTC(vs) ((void *)(vs))
 
 /*
  * Link a virtio_softc to its constants, the device softc, and
@@ -560,7 +560,6 @@ vi_find_cr(int offset) {
 	return (NULL);
 }
 
-/* XXX Send these to the mmio transport. */
 static void
 vi_handle_state_change(struct mmio_devinst *mdi, uint32_t status)
 {
@@ -604,6 +603,7 @@ vi_handle_status(struct virtio_softc *vs, uint32_t status)
 {
 
 	struct mmio_devinst *mdi = vs->vs_mi;
+
 	if (status & VIRTIO_CONFIG_STATUS_FAILED) {
 		mdi->mi_state = MIDEV_FAILED;
 		return;
@@ -619,38 +619,100 @@ vi_handle_status(struct virtio_softc *vs, uint32_t status)
 }
 
 static void
-vi_handle_queue_num(struct virtio_softc *vs)
+vi_handle_host_features_sel(struct virtio_softc *vs, uint32_t sel)
+{
+	uint64_t caps = vs->vs_vc->vc_hv_caps;
+	struct mmio_devinst *mdi = vs->vs_mi;
+
+	if (sel > 1) {
+		EPRINTLN("HOST_FEATURES SEL 0x%x, "
+			"driver confused?", sel);
+		return;
+	}
+	
+	if (sel == 1) {
+		mmio_set_cfgdata32(mdi, VIRTIO_MMIO_HOST_FEATURES,
+			(uint32_t)(caps >> 32));
+	} else {
+		mmio_set_cfgdata32(mdi, VIRTIO_MMIO_HOST_FEATURES,
+			(uint32_t)caps);
+	}
+}
+
+static void
+vi_handle_guest_features(struct virtio_softc *vs, uint32_t features)
+{
+	struct mmio_devinst *mdi = vs->vs_mi;
+	struct virtio_consts *vc = vs->vs_vc;
+	uint64_t caps;
+	int hi;
+
+	/* 
+	 * XXX Make sure that here and everywhere else we are 
+	 * in the proces of negotiating and not in the middle of
+	 * operation.
+	 */
+
+	hi = mmio_get_cfgdata32(mdi, VIRTIO_MMIO_GUEST_FEATURES_SEL);
+	if (hi > 1) {
+		EPRINTLN("GUEST_FEATURES_SEL 0x%x, "
+			"driver confused?", hi);
+		return;
+	}
+
+	if (hi == 1) {
+		/* Update the upper bits, keep the lower ones intact. */
+		caps = (vc->vc_hv_caps | features) >> 32;
+		vs->vs_negotiated_caps &= (vs->vs_negotiated_caps & (((1UL << 32) - 1)) << 32);
+		vs->vs_negotiated_caps |= (caps << 32);
+	} else {
+		/* Update the lower bits, keep the upper ones intact. */
+		caps = (uint32_t)(vc->vc_hv_caps | features);
+		vs->vs_negotiated_caps &= (vs->vs_negotiated_caps & ((1UL << 32) - 1));
+		vs->vs_negotiated_caps |= caps;
+
+		/* The LSBs get sent second, we are ready to apply the features. */
+		if (vc->vc_apply_features)
+			(*vc->vc_apply_features)(DEV_SOFTC(vs),
+				vs->vs_negotiated_caps);
+	}
+
+}
+
+
+static void
+vi_handle_queue_sel(struct virtio_softc *vs)
 {
 	struct mmio_devinst *mdi = vs->vs_mi;
 	struct vqueue_info *vq;
-	int idx;
 
-	idx = mmio_get_cfgdata32(mdi->mi_addr, VIRTIO_MMIO_QUEUE_SEL);
-	if (idx < 0 || idx >= vs->vs_vc->vc_nvq) {
+	vs->vs_curq = mmio_get_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_SEL);
+
+	if (vs->vs_curq < 0 || vs->vs_curq >= vs->vs_vc->vc_nvq) {
 		EPRINTLN("Selected queue %d, driver confused?", vs->vs_curq);
 		return;
 	}
 
-	vs->vs_curq = idx;
-
 	vq = &vs->vs_queues[vs->vs_curq];
-	if (!vq_ring_ready(vq)) {
-		vi_vq_init(mdi, vq);
+	if (vq_ring_ready(vq)) {
+		mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_READY, 1);
 		return;
 	}
-	
 
-	/* XXX What does this call mean otherwise? */
+	/* Part of virtqueue initialization. */
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_NUM_MAX, vq->vq_qsize);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_READY, 0);
+
+	return;
 }
 
 static void
-vi_handle_queue_num(struct virtio_softc *vs)
+vi_handle_queue_num(struct virtio_softc *vs, int32_t qsize)
 {
-	size_t qsize;
+	struct vqueue_info *vq = &vs->vs_queues[vs->vs_curq];
 
-	qsize = mmio_get_cfgdata32(mdi->mi_addr, VIRTIO_MMIO_QUEUE_NUM);
 	if (qsize > vq->vq_qsize || !powerof2(qsize)) {
-		EPRINTLN("QUEUE_NUM %d is invalid, driver confused?", size);
+		EPRINTLN("QUEUE_NUM %d is invalid, driver confused?", qsize);
 		return;
 	}
 
@@ -661,46 +723,24 @@ static void
 vi_handle_queue_ready(struct virtio_softc *vs, uint32_t ready)
 {
 	struct vqueue_info *vq = &vs->vs_queues[vs->vs_curq];
-	uint64_t size;
-	int qsize;
+	struct mmio_devinst *mdi = vs->vs_mi;
 
-	if (read > 1) {
-		EPRINTLN("QUEUE_READY has value %d, driver confused?", size);
+	if (ready > 1) {
+		EPRINTLN("QUEUE_READY has value %d, driver confused?", ready);
 		return;
 	}
 
 	if (ready == 1 && !vq_ring_ready(vq)) {
-		vi_vq_init();
+		vi_vq_init(mdi, vq);
 		return;
 	}
-}
-
-static void
-vi_handle_queue_sel(struct virtio_softc *vs)
-{
-	struct vqueue_info *vq;
-
-	vs->vs_curq = mmio_get_cfgdata32(mdi->mi_addr, VIRTIO_MMIO_QUEUE_SEL);
-
-	if (vs->vs_curq < 0 || vs->vs_curq >= vs->vs_vc->vc_nvq) {
-		EPRINTLN("Selected queue %d, driver confused?", vs->vs_curq);
-		return;
-	}
-
-	vq = &vs->vs_queues[vs->vs_curq];
-	if (vq_ring_ready(vq))
-		return;
-
-	/* Part of virtqueue initialization. */
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_NUM_MAX, vq->vq_qsize << VRING_ALIGN);
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_QUEUE_READY, 0);
-
-	return;
 }
 
 static void
 vi_handle_interrupt_ack(struct virtio_softc *vs, uint32_t ack)
 {
+	struct mmio_devinst *mdi = vs->vs_mi;
+
 	/* 
 	 * Follow the protocol even if we are executing the 
 	 * interrupt ourselves, so we are the ones that sent
@@ -715,19 +755,9 @@ vi_handle_interrupt_ack(struct virtio_softc *vs, uint32_t ack)
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_INTERRUPT_ACK, 0);
 }
 
-
 static void
-vi_handle_guest_features(struct virtio_softc *vs, uint32_t features)
+vi_handle_queue_notify(struct virtio_softc __unused *vs, uint32_t __unused ack)
 {
-	struct mmio_devinst *mdi = vs->vs_mi;
-
-	/* Give them the high or low 32-bits of (what?)_*/
-	vs->vs_negotiated_caps = value & vc->vc_hv_caps;
-	if (vc->vc_apply_features)
-		(*vc->vc_apply_features)(DEV_SOFTC(vs),
-			vs->vs_negotiated_caps);
-
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_HOST_FEATURES, vc->vc_hv_caps);
 }
 
 void
@@ -736,15 +766,14 @@ vi_mmio_write(struct virtio_softc *vs)
 	/* Reported writes are always 32-bit. */
 	const int size = 4; 
 
+	struct mmio_devinst *mdi = vs->vs_mi;
 	struct virtio_consts *vc;
 	struct config_reg *cr;
 	const char *name;
 	uint32_t newoff;
 	int32_t value;
-	uint32_t caps;
 	uint64_t max;
 	int error;
-	bool hi;
 
 	if (vs->vs_mtx)
 		pthread_mutex_lock(vs->vs_mtx);
@@ -768,7 +797,7 @@ vi_mmio_write(struct virtio_softc *vs)
 		value = mmio_get_cfgdata32(mdi, offset);
 
 		if (vc->vc_cfgwrite != NULL)
-			error = (*vc->vc_cfgwrite)(MIDEV_SOFTC(vs), newoff, size, value);
+			error = (*vc->vc_cfgwrite)(DEV_SOFTC(vs), newoff, size, value);
 		else
 			error = 0;
 		if (!error)
@@ -793,6 +822,10 @@ bad:
 	value = mmio_get_cfgdata32(mdi, cr->cr_offset);
 
 	switch (cr->cr_offset) {
+	case VIRTIO_MMIO_STATUS:		    
+		vi_handle_status(vs, value);
+		break;
+
 	case VIRTIO_MMIO_HOST_FEATURES_SEL:  		
 		vi_handle_host_features_sel(vs, value);
 		break;
@@ -805,27 +838,20 @@ bad:
 		vi_handle_queue_sel(vs);
 		break;
 
-	case VIRTIO_MMIO_QUEUE_NUM_MAX: 	    
-		vi_handle_queue_num_max(vs);
-		break;
-
 	case VIRTIO_MMIO_QUEUE_NUM:
 		vi_handle_queue_num(vs, value);
 		break;
 
+	case VIRTIO_MMIO_QUEUE_READY:
+		vi_handle_queue_ready(vs, value);
+		break;
 
 	case VIRTIO_MMIO_QUEUE_NOTIFY:
-		/* XXX The actual kicks from the device. */
-		printf("%s:%d Unimplemented\n", __func__, __LINE__);
-		exit(1);
+		vi_handle_queue_notify(vs, value);
 		break;
 
 	case VIRTIO_MMIO_INTERRUPT_ACK: 	    	
 		vi_handle_interrupt_ack(vs, value);
-		break;
-
-	case VIRTIO_MMIO_STATUS:		    
-		vi_handle_status(vs, value);
 		break;
 	}
 

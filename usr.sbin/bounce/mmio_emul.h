@@ -70,7 +70,7 @@ struct mmio_devinst {
 };
 #define MMIO_EMUL_SET(x)   DATA_SET(mmio_devemu_set, x)
 
-/* XXX Determine this more elegantly. */
+/* XXX Sensible default until proven otherwise. */
 #define MMIO_TOTAL_SIZE (1024 * 1024 * 10)
 #define MMIO_CTRDEV ("/dev/virtio_bounce")
 
