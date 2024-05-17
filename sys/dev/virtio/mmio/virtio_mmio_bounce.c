@@ -263,8 +263,10 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 	 * Populate the object with physically contiguous pages, because
 	 * the object is used to back the virtqueue descriptor regions.
 	 */
+	VM_OBJECT_WLOCK(obj);
 	m = vm_page_alloc_contig(obj, 0, VM_ALLOC_NORMAL, obj->size,
 			0, (uint64_t) -1, 1, 0, VM_MEMATTR_DEFAULT);
+	VM_OBJECT_WUNLOCK(obj);
 	if (m == NULL) {
 		vm_object_deallocate(obj);
 		return (ENOMEM);
@@ -283,14 +285,6 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 		VMFS_OPTIMAL_SPACE, VM_PROT_ALL, VM_PROT_ALL, 0);
 	if (error != KERN_SUCCESS) {
 		vm_object_deallocate(obj);
-		return (ENOMEM);
-	}
-
-	VTBOUNCE_WARN("\n");
-	error = vm_map_wire(kernel_map, baseaddr, baseaddr + bytes,
-	    VM_MAP_WIRE_SYSTEM|VM_MAP_WIRE_NOHOLES);
-	if (error != KERN_SUCCESS) {
-		vm_map_remove(kernel_map, baseaddr, baseaddr + bytes);
 		return (ENOMEM);
 	}
 
