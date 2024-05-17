@@ -264,7 +264,7 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 	 * the object is used to back the virtqueue descriptor regions.
 	 */
 	VM_OBJECT_WLOCK(obj);
-	m = vm_page_alloc_contig(obj, 0, VM_ALLOC_NORMAL, obj->size,
+	m = vm_page_alloc_contig(obj, 0, VM_ALLOC_NORMAL | VM_ALLOC_NOBUSY, obj->size,
 			0, (uint64_t) -1, 1, 0, VM_MEMATTR_DEFAULT);
 	VM_OBJECT_WUNLOCK(obj);
 	if (m == NULL) {
@@ -300,7 +300,7 @@ virtio_bounce_dtor(void *arg)
 {
 	struct vtbounce_softc *sc = (struct vtbounce_softc *)arg;
 
-	/* XXX Fix device detach */
+	/* XXX Fix device detach - this is associated with fini(). */
 	/*
 	if (sc->vtb_dev != 0)
 		VIRTIO_DETACH(sc->vtb_dev);
@@ -454,8 +454,9 @@ virtio_bounce_init(void)
 static void
 virtio_bounce_fini(struct vtbounce_softc *sc)
 {
-	VTBOUNCE_WARN("\n");
-	panic("unimplemented");
+	/* XXX Drain the virtio device. */
+	/* XXX Detach the virtio device. */
+	return;
 }
 
 
