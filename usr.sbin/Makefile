@@ -5,6 +5,7 @@ SUBDIR=	adduser \
 	arp \
 	binmiscctl \
 	boottrace \
+	bounce \
 	bsdconfig \
 	camdd \
 	cdcontrol \
