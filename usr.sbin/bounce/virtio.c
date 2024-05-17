@@ -761,7 +761,7 @@ vi_handle_queue_notify(struct virtio_softc __unused *vs, uint32_t __unused ack)
 }
 
 void
-vi_mmio_write(struct virtio_softc *vs)
+vi_mmio_write(struct virtio_softc *vs, uint64_t offset)
 {
 	/* Reported writes are always 32-bit. */
 	const int size = 4; 
@@ -777,12 +777,6 @@ vi_mmio_write(struct virtio_softc *vs)
 
 	if (vs->vs_mtx)
 		pthread_mutex_lock(vs->vs_mtx);
-
-	/* 
-	 * XXX Read in the offset somehow.
-	 * Use part of the common region or an ioctl, since we can't use kevent.
-	 */
-	uint64_t offset = 0;
 
 	vc = vs->vs_vc;
 	name = vc->vc_name;

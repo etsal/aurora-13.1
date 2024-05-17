@@ -60,7 +60,7 @@ struct blockif_req {
 struct mmio_devinst;
 struct blockif_ctxt;
 
-typedef void blockif_resize_cb(struct blockif_ctxt *, void *, size_t);
+typedef void blockif_resize_cb(struct blockif_ctxt *, void *, size_t, uint64_t);
 
 int	blockif_legacy_config(nvlist_t *nvl, const char *opts);
 struct blockif_ctxt *blockif_open(nvlist_t *nvl, const char *ident);

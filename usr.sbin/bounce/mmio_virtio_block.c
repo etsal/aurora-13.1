@@ -391,7 +391,7 @@ mmio_vtblk_notify(void *vsc, struct vqueue_info *vq)
 
 static void
 mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
-    size_t new_size)
+    size_t new_size, uint64_t data __unused)
 {
 	struct mmio_vtblk_softc *sc;
 
@@ -409,7 +409,7 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 }
 
 static void
-mmio_vtblk_event(int fd, enum ev_type type, void *arg)
+mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 {
 	struct mmio_vtblk_softc *sc = (struct mmio_vtblk_softc *)arg;
 	struct mmio_devinst *mdi = sc->vbsc_vs.vs_mi;
@@ -417,7 +417,7 @@ mmio_vtblk_event(int fd, enum ev_type type, void *arg)
 	assert(fd == mdi->mi_fd);
 	assert(type == EVF_READ);
 
-	vi_mmio_write(&sc->vbsc_vs);
+	vi_mmio_write(&sc->vbsc_vs, offset);
 	
 	/* Let in-progress operations continue.  */
 	ioctl(mdi->mi_fd, VIRTIO_BOUNCE_ACK);

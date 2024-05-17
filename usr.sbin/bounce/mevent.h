@@ -40,17 +40,15 @@ enum ev_type {
 /* Filter flags for EVF_VNODE */
 #define	EVFF_ATTRIB	0x0001
 
+typedef void mevent_cb_t(int, enum ev_type, void *, uint64_t);
 struct mevent;
 
-struct mevent *mevent_add(int fd, enum ev_type type,
-			  void (*func)(int, enum ev_type, void *),
+struct mevent *mevent_add(int fd, enum ev_type type, mevent_cb_t *func,
 			  void *param);
 struct mevent *mevent_add_flags(int fd, enum ev_type type, int fflags,
-			  void (*func)(int, enum ev_type, void *),
-			  void *param);
+			  mevent_cb_t *func, void *param);
 struct mevent *mevent_add_disabled(int fd, enum ev_type type,
-			  void (*func)(int, enum ev_type, void *),
-			  void *param);
+			  mevent_cb_t *func, void *param);
 int	mevent_enable(struct mevent *evp);
 int	mevent_disable(struct mevent *evp);
 int	mevent_delete(struct mevent *evp);

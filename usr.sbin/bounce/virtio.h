@@ -335,5 +335,5 @@ void	vq_relchain_publish(struct vqueue_info *vq);
 void	vq_relchain(struct vqueue_info *vq, uint16_t idx, uint32_t iolen);
 void	vq_endchains(struct vqueue_info *vq, int used_all_avail);
 
-void	vi_mmio_write(struct virtio_softc *vs);
+void	vi_mmio_write(struct virtio_softc *vs, uint64_t offset);
 #endif	/* _BHYVE_VIRTIO_H_ */

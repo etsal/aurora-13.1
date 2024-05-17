@@ -410,7 +410,7 @@ blockif_thr(void *arg)
 
 static void
 blockif_sigcont_handler(int signal __unused, enum ev_type type __unused,
-    void *arg __unused)
+    void *arg __unused, uint64_t data __unused)
 {
 	struct blockif_sig_elem *bse;
 
@@ -647,7 +647,8 @@ err:
 }
 
 static void
-blockif_resized(int fd, enum ev_type type __unused, void *arg)
+blockif_resized(int fd, enum ev_type type __unused, void *arg,
+	uint64_t data __unused)
 {
 	struct blockif_ctxt *bc;
 	struct stat sb;
@@ -669,7 +670,7 @@ blockif_resized(int fd, enum ev_type type __unused, void *arg)
 	pthread_mutex_lock(&bc->bc_mtx);
 	if (mediasize != bc->bc_size) {
 		bc->bc_size = mediasize;
-		bc->bc_resize_cb(bc, bc->bc_resize_cb_arg, bc->bc_size);
+		bc->bc_resize_cb(bc, bc->bc_resize_cb_arg, bc->bc_size, 0);
 	}
 	pthread_mutex_unlock(&bc->bc_mtx);
 }
