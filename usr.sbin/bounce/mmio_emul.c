@@ -72,18 +72,6 @@ mmio_emul_control_init(struct mmio_devinst *mdi)
 	return (0);
 }
 
-static void
-mmio_emul_control_fini(struct mmio_devinst *mdi)
-{
-	munmap(mdi->mi_addr, mdi->mi_bytes);
-
-	if (ioctl(mdi->mi_fd, VIRTIO_BOUNCE_FINI) == -1) {
-		EPRINTLN("Control device teardown error: %s",
-		    strerror(errno));
-	}
-	close(mdi->mi_fd);
-}
-
 static int
 mmio_emul_init(struct mmio_devemu *mde, nvlist_t *nvl)
 {
@@ -106,7 +94,6 @@ mmio_emul_init(struct mmio_devemu *mde, nvlist_t *nvl)
 
 	err = (*mde->me_init)(mdi, nvl);
 	if (err != 0) {
-		mmio_emul_control_fini(mdi);
 		free(mdi);
 		return (err);
 	}
