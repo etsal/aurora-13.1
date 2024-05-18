@@ -492,8 +492,6 @@ virtio_bounce_create_transport(device_t parent, struct vtbounce_softc *vtbsc)
 
 	sc = device_get_softc(transport);
 	mmiosc = &sc->vtmb_mmio;
-	mmiosc->res[0] = bus_alloc_resource_any(transport, SYS_RES_MEMORY,
-		&rid, 0);
 
 	VTBOUNCE_WARN("Bus %p\n", mmiosc->res[0]);
 	VTBOUNCE_WARN("Handle %p\n", (void *)mmiosc->res[0]->r_bushandle);
