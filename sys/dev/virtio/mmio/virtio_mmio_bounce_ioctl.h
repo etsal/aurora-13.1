@@ -17,10 +17,9 @@ struct virtio_bounce_io_args {
 };
 
 #define VIRTIO_BOUNCE_INIT	_IO('v', 1)
-#define VIRTIO_BOUNCE_FINI	_IO('v', 2)
-#define VIRTIO_BOUNCE_KICK	_IO('v', 3)
-#define VIRTIO_BOUNCE_ACK	_IO('v', 4)
-#define VIRTIO_BOUNCE_TRANSFER	_IOWR('v', 5, sizeof(struct virtio_bounce_io_args))
+#define VIRTIO_BOUNCE_KICK	_IO('v', 2)
+#define VIRTIO_BOUNCE_ACK	_IO('v', 3)
+#define VIRTIO_BOUNCE_TRANSFER	_IOWR('v', 4, sizeof(struct virtio_bounce_io_args))
 
 
 #endif /* _VIRTIO_MMIO_BOUNCE_IOCTL_ */

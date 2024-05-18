@@ -62,6 +62,7 @@ struct vtmmio_virtqueue {
 	int			 vtv_no_intr;
 };
 
+static int	vtmmio_attach(device_t);
 static int	vtmmio_detach(device_t);
 static int	vtmmio_suspend(device_t);
 static int	vtmmio_resume(device_t);
@@ -84,19 +85,15 @@ static int	vtmmio_reinit(device_t, uint64_t);
 static void	vtmmio_reinit_complete(device_t);
 static void	vtmmio_notify_virtqueue(device_t, uint16_t, bus_size_t);
 static int	vtmmio_config_generation(device_t);
-static uint8_t	vtmmio_get_status(device_t);
-static void	vtmmio_set_status(device_t, uint8_t);
 static void	vtmmio_read_dev_config(device_t, bus_size_t, void *, int);
 static uint64_t	vtmmio_read_dev_config_8(struct vtmmio_softc *, bus_size_t);
 static void	vtmmio_write_dev_config(device_t, bus_size_t, const void *, int);
 static void	vtmmio_describe_features(struct vtmmio_softc *, const char *,
 		    uint64_t);
-static void	vtmmio_probe_and_attach_child(struct vtmmio_softc *);
 static int	vtmmio_reinit_virtqueue(struct vtmmio_softc *, int);
 static void	vtmmio_free_interrupts(struct vtmmio_softc *);
 static void	vtmmio_free_virtqueues(struct vtmmio_softc *);
 static void	vtmmio_release_child_resources(struct vtmmio_softc *);
-static void	vtmmio_reset(struct vtmmio_softc *);
 static void	vtmmio_select_virtqueue(struct vtmmio_softc *, int);
 static void	vtmmio_vq_intr(void *);
 
@@ -127,13 +124,6 @@ do {								\
 	if (sc->platform != NULL)				\
 		VIRTIO_MMIO_NOTE(sc->platform, (o), (v));	\
 } while (0)
-
-#define vtmmio_read_config_1(sc, o) \
-	bus_read_1((sc)->res[0], (o))
-#define vtmmio_read_config_2(sc, o) \
-	bus_read_2((sc)->res[0], (o))
-#define vtmmio_read_config_4(sc, o) \
-	bus_read_4((sc)->res[0], (o))
 
 static device_method_t vtmmio_methods[] = {
 	/* Device interface. */
@@ -689,7 +679,7 @@ vtmmio_config_generation(device_t dev)
 	return (gen);
 }
 
-static uint8_t
+uint8_t
 vtmmio_get_status(device_t dev)
 {
 	struct vtmmio_softc *sc;
@@ -699,7 +689,7 @@ vtmmio_get_status(device_t dev)
 	return (vtmmio_read_config_4(sc, VIRTIO_MMIO_STATUS));
 }
 
-static void
+void
 vtmmio_set_status(device_t dev, uint8_t status)
 {
 	struct vtmmio_softc *sc;
@@ -875,7 +865,7 @@ vtmmio_describe_features(struct vtmmio_softc *sc, const char *msg,
 	virtio_describe(dev, msg, features, sc->vtmmio_child_feat_desc);
 }
 
-static void
+void
 vtmmio_probe_and_attach_child(struct vtmmio_softc *sc)
 {
 	device_t dev, child;
@@ -976,7 +966,7 @@ vtmmio_release_child_resources(struct vtmmio_softc *sc)
 	vtmmio_free_virtqueues(sc);
 }
 
-static void
+void
 vtmmio_reset(struct vtmmio_softc *sc)
 {
 

@@ -55,6 +55,7 @@
 #include <machine/resource.h>
 #include <machine/vmparam.h>
 
+#include <dev/virtio/virtio_config.h>
 #include <dev/virtio/virtqueue.h>
 #include <dev/virtio/mmio/virtio_mmio.h>
 
@@ -62,6 +63,7 @@
 #include "virtio_mmio_if.h"
 
 #define VTBOUNCE_PLATFORM ((device_t)0x0badcafe)
+#define VTBOUNCE_MAGIC ((uint64_t)0x84848484ULL)
 
 /* XXX Make this a sysctl. */
 #define VTBOUNCE_MAPSZ (1024 * 1024 * 10)
@@ -80,6 +82,7 @@ static driver_t *vtbounce_driver;
 struct vtbounce_softc {
 	struct mtx		vtb_mtx;
 	struct knlist		vtb_note;
+	uint32_t		vtb_magic;
 
 	vm_object_t		vtb_object;
 	vm_ooffset_t		vtb_baseaddr;
@@ -106,6 +109,7 @@ struct vtmmio_bounce_softc {
 static void
 vtmmio_bounce_identify(driver_t *driver, device_t parent)
 {
+	VTBOUNCE_WARN("\n");
 	vtbounce_parent = parent;
 	vtbounce_driver = driver;
 }
@@ -116,28 +120,72 @@ vtmmio_get_vtb(device_t dev)
 	struct vtmmio_bounce_softc *sc;
 
 	sc = device_get_softc(dev);
+	MPASS(sc->vtmb_bounce->vtb_magic == VTBOUNCE_MAGIC);
+
 	return (sc->vtmb_bounce);
 }
 
 static int
 vtmmio_bounce_probe(device_t dev)
 {
-	VTBOUNCE_WARN("\n");
-	printf("virtio bounce can only be explicitly added\n");
-	return (EINVAL);
+	struct vtmmio_bounce_softc *sc;
+	struct vtmmio_softc *mmiosc;
+	uint32_t magic, version;
+
+	sc = device_get_softc(dev);
+	mmiosc = &sc->vtmb_mmio;
+
+	/* Fake platform to trigger virtio_mmio_note() on writes. */
+	sc->vtmb_mmio.platform = VTBOUNCE_PLATFORM;
+
+	magic = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_MAGIC_VALUE);
+	if (magic != VIRTIO_MMIO_MAGIC_VIRT) {
+		device_printf(dev, "Bad magic value %#x\n", magic);
+		return (ENXIO);
+	}
+
+	version = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_VERSION);
+	if (version != 2) {
+		device_printf(dev, "Unsupported version: %#x\n", version);
+		return (ENXIO);
+	}
+
+	if (vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_DEVICE_ID) == 0)
+		return (ENXIO);
+
+	device_set_desc(dev, "VirtIO Emulated MMIO adapter");
+
+	return (0);
 }
 
-static int
+static int 
 vtmmio_bounce_attach(device_t dev)
 {
-	struct vtmmio_softc *sc;
+	struct vtmmio_bounce_softc *sc;
+	struct vtmmio_softc *mmiosc;
+	device_t child;
 
-	VTBOUNCE_WARN("\n");
 	sc = device_get_softc(dev);
-	/* Fake platform to trigger virtio_mmio_note() on writes. */
-	sc->platform = VTBOUNCE_PLATFORM;
+	mmiosc = &sc->vtmb_mmio;
 
-	return (vtmmio_attach(dev));
+	mmiosc->vtmmio_version = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_VERSION);
+
+	vtmmio_reset(mmiosc);
+
+	/* Tell the host we've noticed this device. */
+	vtmmio_set_status(dev, VIRTIO_CONFIG_STATUS_ACK);
+
+	if ((child = device_add_child(dev, NULL, -1)) == NULL) {
+		device_printf(dev, "Cannot create child device.\n");
+		vtmmio_set_status(dev, VIRTIO_CONFIG_STATUS_FAILED);
+		DEVICE_DETACH(dev);
+		return (ENOMEM);
+	}
+
+	mmiosc->vtmmio_child_dev = child;
+	vtmmio_probe_and_attach_child(mmiosc);
+
+	return (0);
 }
 
 /* Notify userspace of a write, and wait for a response. */
@@ -150,6 +198,7 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 
 	sc = device_get_softc(dev);
 	vtbsc = sc->vtmb_bounce;
+	MPASS(vtbsc->vtb_magic == VTBOUNCE_MAGIC);
 
 	VTBOUNCE_WARN("\n");
 
@@ -197,7 +246,6 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 
 	mtx_unlock(&vtbsc->vtb_mtx);
 
-
 	return (1);
 }
 
@@ -211,6 +259,8 @@ vtmmio_bounce_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *i
 	struct vtbounce_softc *sc;
 
 	sc = vtmmio_get_vtb(dev);
+	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
+	VTBOUNCE_WARN("%p\n", sc);
 
 	mtx_lock(&sc->vtb_mtx);
 	sc->vtb_intr = handler;
@@ -222,12 +272,12 @@ vtmmio_bounce_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *i
 
 static device_method_t vtmmio_bounce_methods[] = {
         /* Device interface. */
+	DEVMETHOD(device_attach,		vtmmio_bounce_attach),
 	DEVMETHOD(device_identify,		vtmmio_bounce_identify),
 	DEVMETHOD(device_probe,			vtmmio_bounce_probe),
-	DEVMETHOD(device_attach,		vtmmio_bounce_attach),
 
-	DEVMETHOD(virtio_mmio_setup_intr,	vtmmio_bounce_setup_intr),
 	DEVMETHOD(virtio_mmio_note,		vtmmio_bounce_note),
+	DEVMETHOD(virtio_mmio_setup_intr,	vtmmio_bounce_setup_intr),
 
         DEVMETHOD_END
 };
@@ -236,12 +286,10 @@ DEFINE_CLASS_1(virtio_mmio, vtmmio_bounce_driver, vtmmio_bounce_methods,
     sizeof(struct vtbounce_softc), vtmmio_driver);
 DRIVER_MODULE(vtmmio_bounce, nexus, vtmmio_bounce_driver, 0, 0);
 
-struct cdev *bouncedev;
+static struct cdev *bouncedev;
 
 /*
  * Create and map the device memory into the kernel.
- *
- * The mapping/wiring logic is taken from kern/link_elf_obj.c
  */ 
 static int
 virtio_bounce_map_kernel(struct vtbounce_softc *sc)
@@ -298,13 +346,23 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 static void
 virtio_bounce_dtor(void *arg)
 {
+	struct vtmmio_bounce_softc *devsc;
 	struct vtbounce_softc *sc = (struct vtbounce_softc *)arg;
+	device_t dev;
 
-	/* XXX Fix device detach - this is associated with fini(). */
-	/*
-	if (sc->vtb_dev != 0)
-		VIRTIO_DETACH(sc->vtb_dev);
-		*/
+	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
+
+	dev = sc->vtb_dev;
+	if (dev != NULL) {
+		devsc = device_get_softc(dev);
+
+		DEVICE_DETACH(dev);
+
+		bus_release_resource(dev, SYS_RES_MEMORY, 0,
+				devsc->vtmb_mmio.res[0]);
+		device_delete_child(vtbounce_parent, dev);
+	}
+
 
 	VTBOUNCE_WARN("\n");
 	if (sc->vtb_baseaddr != 0) {
@@ -336,6 +394,7 @@ virtio_bounce_open(struct cdev *cdev, int oflags, int devtype, struct thread *td
 	if (sc == NULL)
 		return (ENOMEM);
 
+	sc->vtb_magic = VTBOUNCE_MAGIC;
 	VTBOUNCE_WARN("\n");
 	mtx_init(&sc->vtb_mtx, "vtbounce", NULL, MTX_DEF);
 	knlist_init_mtx(&sc->vtb_note, &sc->vtb_mtx);
@@ -348,7 +407,7 @@ virtio_bounce_open(struct cdev *cdev, int oflags, int devtype, struct thread *td
 		return (ENOMEM);
 	}
 
-	VTBOUNCE_WARN("\n");
+	VTBOUNCE_WARN("%p\n", sc);
 	error = virtio_bounce_map_kernel(sc);
 	if (error != 0) {
 		virtio_bounce_dtor(sc);
@@ -393,6 +452,8 @@ virtio_bounce_ringalloc(device_t dev, size_t size)
 	struct vtbounce_softc *sc = vtmmio_get_vtb(dev);
 	void *mem;
 
+	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
+
 	mtx_lock(&sc->vtb_mtx);
 	if (sc->vtb_allocated + size > sc->vtb_bytes) {
 		mtx_unlock(&sc->vtb_mtx);
@@ -407,13 +468,62 @@ virtio_bounce_ringalloc(device_t dev, size_t size)
 	return (mem);
 }
 
-/* Create the virtio device. */
+static device_t
+virtio_bounce_create_transport(device_t parent, struct vtbounce_softc *vtbsc)
+{
+	struct vtmmio_bounce_softc *mmiosc;
+	device_t transport;
+
+	/* Create an instance of the emulated mmio transport. */
+	transport = BUS_ADD_CHILD(parent, 0, vtmmio_bounce_driver.name, -1);
+	bus_set_resource(transport, SYS_RES_MEMORY, 0, vtbsc->vtb_baseaddr,
+			vtbsc->vtb_bytes);
+	device_set_driver(transport, vtbounce_driver);
+
+	mmiosc = device_get_softc(transport);
+
+	/* Ring buffer allocation callback. */
+	mmiosc->vtmb_mmio.vtmmio_ringalloc_cb = virtio_bounce_ringalloc;
+
+	return (transport);
+}
+
+static int
+virtio_bounce_linkup_transport(struct vtbounce_softc *vtbsc, device_t dev)
+{
+	struct vtmmio_bounce_softc *mmiosc;
+
+	mtx_lock(&vtbsc->vtb_mtx);
+	if (vtbsc->vtb_dev != NULL) {
+		mtx_unlock(&vtbsc->vtb_mtx);
+		return (EALREADY);
+	}
+
+	mmiosc = device_get_softc(dev);
+
+	/* Have the device and cdev be able to refer to each other. */
+	mmiosc->vtmb_bounce = vtbsc;
+	vtbsc->vtb_dev = dev;
+
+	mtx_unlock(&vtbsc->vtb_mtx);
+
+	return (0);
+}
+
+/* 
+ * Create virtio device. This function does the initialization both
+ * for the emulated transport, and for the virtio device. These are
+ * normally initialized at boot time using vtmmio_probe/vtmmio_attach,
+ * and vtmmio_probe_and_attach_child, respectively. We do this initialization
+ * here because we are dynamically creating the devices after booting, so 
+ * we cannot use the Newbus methods.
+ */
 static int
 virtio_bounce_init(void)
 {
 	struct vtmmio_bounce_softc *mmiosc;
 	struct vtbounce_softc *vtbsc;
-	device_t child;
+	device_t transport;
 	int error;
 
 	VTBOUNCE_WARN("\n");
@@ -422,43 +532,35 @@ virtio_bounce_init(void)
 	if (error != 0)
 		return (error);
 
-	VTBOUNCE_WARN("\n");
-	mtx_lock(&vtbsc->vtb_mtx);
-	if (vtbsc->vtb_dev != NULL) {
-		mtx_unlock(&vtbsc->vtb_mtx);
-		return (EINVAL);
-	}
+	MPASS(vtbsc->vtb_magic == VTBOUNCE_MAGIC);
 
 	VTBOUNCE_WARN("\n");
+
 	/* Create the child and assign its resources. */
-	child = BUS_ADD_CHILD(vtbounce_parent, 0, vtmmio_bounce_driver.name, -1);
-	bus_set_resource(child, SYS_RES_MEMORY, 0, vtbsc->vtb_baseaddr,
-			vtbsc->vtb_bytes);
-	device_set_driver(child, vtbounce_driver);
+	transport = virtio_bounce_create_transport(vtbounce_parent, vtbsc);
 
-	/* Have the device and cdev be able to refer to each other. */
-	mmiosc = device_get_softc(child);
-	mmiosc->vtmb_bounce = vtbsc;
-	mmiosc->vtmb_mmio.vtmmio_ringalloc_cb = virtio_bounce_ringalloc;
-	vtbsc->vtb_dev = child;
+	error = DEVICE_PROBE(transport);
+	if (error != 0)
+		goto err;
 
-	/* Ring buffer allocation callback. */
+	error = virtio_bounce_linkup_transport(vtbsc, transport);
+	if (error != 0)
+		goto err;
 
-	mtx_unlock(&vtbsc->vtb_mtx);
 	VTBOUNCE_WARN("\n");
 
-	return (0);
-}
+	return (DEVICE_ATTACH(transport));
 
-/* Destroy the virtio device. */
-static void
-virtio_bounce_fini(struct vtbounce_softc *sc)
-{
-	/* XXX Drain the virtio device. */
-	/* XXX Detach the virtio device. */
-	return;
-}
+err:
 
+	mmiosc = device_get_softc(transport);
+
+	bus_release_resource(transport, SYS_RES_MEMORY, 0,
+			mmiosc->vtmb_mmio.res[0]);
+	device_delete_child(vtbounce_parent, transport);
+
+	return (error);
+}
 
 /* 
  * Instead of triggering an interrupt to handle 
@@ -535,13 +637,11 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, stru
 	if (ret != 0)
 		return (ret);
 
+	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
 	VTBOUNCE_WARN("\n");
 	switch (cmd) {
 	case VIRTIO_BOUNCE_INIT:
 		ret = virtio_bounce_init();
-		break;
-	case VIRTIO_BOUNCE_FINI:
-		virtio_bounce_fini(sc);
 		break;
 	case VIRTIO_BOUNCE_KICK:
 		virtio_bounce_kick(sc);
@@ -560,8 +660,8 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, stru
 static void
 virtio_bounce_filt_detach(struct knote *kn)
 {
-	/* XXX Remove the control block of the softc as private data. */
 	VTBOUNCE_WARN("\n");
+	kn->kn_hook = NULL;
 }
 
 static int
@@ -570,7 +670,10 @@ virtio_bounce_filt_read(struct knote *kn, long hint)
 	struct vtbounce_softc *sc;
 
 	VTBOUNCE_WARN("\n");
+
 	sc = (struct vtbounce_softc *)kn->kn_hook;
+	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
+
 	mtx_lock(&sc->vtb_mtx);
 	if (sc->vtb_offset == 0) {
 		mtx_unlock(&sc->vtb_mtx);
@@ -602,6 +705,7 @@ virtio_bounce_kqfilter(struct cdev *dev, struct knote *kn)
 	error = devfs_get_cdevpriv((void **)&sc);
 	if (error != 0)
 		return (error);
+	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
 
 	VTBOUNCE_WARN("\n");
 	if (kn->kn_filter != EVFILT_READ) {
@@ -629,7 +733,7 @@ static struct cdevsw virtio_bounce_cdevsw = {
 };
 
 static int
-virtio_bounce_dev_init(void)
+virtio_bounce_dev_create(void)
 {
 	bouncedev = make_dev(&virtio_bounce_cdevsw, 0, UID_ROOT, GID_OPERATOR,
 	    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP, "virtio_bounce");
@@ -655,7 +759,7 @@ virtio_bounce_loader(struct module *m, int what, void *arg)
 
 	switch (what) {
 	case MOD_LOAD:
-		err = virtio_bounce_dev_init();
+		err = virtio_bounce_dev_create();
 		break;
 	case MOD_UNLOAD:
 		virtio_bounce_dev_destroy();
