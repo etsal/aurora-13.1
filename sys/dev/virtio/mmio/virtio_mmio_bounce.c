@@ -132,11 +132,17 @@ vtmmio_bounce_probe(device_t dev)
 	struct vtmmio_softc *mmiosc;
 	uint32_t magic, version;
 
+	VTBOUNCE_WARN("\n");
 	sc = device_get_softc(dev);
+	VTBOUNCE_WARN("\n");
 	mmiosc = &sc->vtmb_mmio;
 
+	VTBOUNCE_WARN("\n");
 	/* Fake platform to trigger virtio_mmio_note() on writes. */
 	sc->vtmb_mmio.platform = VTBOUNCE_PLATFORM;
+	VTBOUNCE_WARN("\n");
+	VTBOUNCE_WARN("Bus %p\n", mmiosc->res[0]);
+	VTBOUNCE_WARN("Handle %p\n", (void *)mmiosc->res[0]->r_bushandle);
 
 	magic = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_MAGIC_VALUE);
 	if (magic != VIRTIO_MMIO_MAGIC_VIRT) {
@@ -144,15 +150,18 @@ vtmmio_bounce_probe(device_t dev)
 		return (ENXIO);
 	}
 
+	VTBOUNCE_WARN("\n");
 	version = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_VERSION);
 	if (version != 2) {
 		device_printf(dev, "Unsupported version: %#x\n", version);
 		return (ENXIO);
 	}
 
+	VTBOUNCE_WARN("\n");
 	if (vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_DEVICE_ID) == 0)
 		return (ENXIO);
 
+	VTBOUNCE_WARN("\n");
 	device_set_desc(dev, "VirtIO Emulated MMIO adapter");
 
 	return (0);
@@ -319,8 +328,7 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 		vm_object_deallocate(obj);
 		return (ENOMEM);
 	}
-
-	VTBOUNCE_WARN("\n");
+	VTBOUNCE_WARN("Page physical address %lx\n", m->phys_addr);
 
 #ifdef __amd64__
 	baseaddr = KERNBASE;
@@ -471,19 +479,27 @@ virtio_bounce_ringalloc(device_t dev, size_t size)
 static device_t
 virtio_bounce_create_transport(device_t parent, struct vtbounce_softc *vtbsc)
 {
-	struct vtmmio_bounce_softc *mmiosc;
+	struct vtmmio_bounce_softc *sc;
+	struct vtmmio_softc *mmiosc;
 	device_t transport;
+	int rid = 0;
 
 	/* Create an instance of the emulated mmio transport. */
 	transport = BUS_ADD_CHILD(parent, 0, vtmmio_bounce_driver.name, -1);
-	bus_set_resource(transport, SYS_RES_MEMORY, 0, vtbsc->vtb_baseaddr,
-			vtbsc->vtb_bytes);
+	bus_set_resource(transport, SYS_RES_MEMORY, rid,
+			vtophys(vtbsc->vtb_baseaddr), vtbsc->vtb_bytes);
 	device_set_driver(transport, vtbounce_driver);
 
-	mmiosc = device_get_softc(transport);
+	sc = device_get_softc(transport);
+	mmiosc = &sc->vtmb_mmio;
+	mmiosc->res[0] = bus_alloc_resource_any(transport, SYS_RES_MEMORY,
+		&rid, 0);
+
+	VTBOUNCE_WARN("Bus %p\n", mmiosc->res[0]);
+	VTBOUNCE_WARN("Handle %p\n", (void *)mmiosc->res[0]->r_bushandle);
 
 	/* Ring buffer allocation callback. */
-	mmiosc->vtmb_mmio.vtmmio_ringalloc_cb = virtio_bounce_ringalloc;
+	mmiosc->vtmmio_ringalloc_cb = virtio_bounce_ringalloc;
 
 	return (transport);
 }
@@ -516,7 +532,7 @@ virtio_bounce_linkup_transport(struct vtbounce_softc *vtbsc, device_t dev)
  * normally initialized at boot time using vtmmio_probe/vtmmio_attach,
  * and vtmmio_probe_and_attach_child, respectively. We do this initialization
  * here because we are dynamically creating the devices after booting, so 
- * we cannot use the Newbus methods.
+ * we must manually invoke the Newbus methods.
  */
 static int
 virtio_bounce_init(void)
@@ -539,11 +555,11 @@ virtio_bounce_init(void)
 	/* Create the child and assign its resources. */
 	transport = virtio_bounce_create_transport(vtbounce_parent, vtbsc);
 
-	error = DEVICE_PROBE(transport);
+	error = virtio_bounce_linkup_transport(vtbsc, transport);
 	if (error != 0)
 		goto err;
 
-	error = virtio_bounce_linkup_transport(vtbsc, transport);
+	error = DEVICE_PROBE(transport);
 	if (error != 0)
 		goto err;
 
