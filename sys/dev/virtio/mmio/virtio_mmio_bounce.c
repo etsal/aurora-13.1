@@ -75,6 +75,7 @@
 
 static device_t vtbounce_parent;
 static driver_t *vtbounce_driver;
+int global_tracking;
 
 /*
  * Information on a bounce character device instance.
@@ -110,9 +111,9 @@ struct vtmmio_bounce_softc {
 static void
 vtmmio_bounce_identify(driver_t *driver, device_t parent)
 {
-	VTBOUNCE_WARN("\n");
 	vtbounce_parent = parent;
 	vtbounce_driver = driver;
+	VTBOUNCE_WARN("%p %p\n", vtbounce_parent, vtbounce_driver);
 }
 
 static struct vtbounce_softc *
@@ -188,7 +189,11 @@ vtmmio_bounce_attach(device_t dev)
 	if ((child = device_add_child(dev, NULL, -1)) == NULL) {
 		device_printf(dev, "Cannot create child device.\n");
 		vtmmio_set_status(dev, VIRTIO_CONFIG_STATUS_FAILED);
+
+		mtx_lock(&Giant);
 		DEVICE_DETACH(dev);
+		mtx_unlock(&Giant);
+
 		return (ENOMEM);
 	}
 
@@ -300,6 +305,7 @@ static device_method_t vtmmio_bounce_methods[] = {
 DEFINE_CLASS_1(virtio_mmio, vtmmio_bounce_driver, vtmmio_bounce_methods,
     sizeof(struct vtbounce_softc), vtmmio_driver);
 DRIVER_MODULE(vtmmio_bounce, ram, vtmmio_bounce_driver, 0, 0);
+MODULE_DEPEND(vtmmio_bounce, ram, 1, 1, 1);
 
 static struct cdev *bouncedev;
 
@@ -366,10 +372,15 @@ virtio_bounce_dtor(void *arg)
 	if (dev != NULL) {
 		devsc = device_get_softc(dev);
 
+		mtx_lock(&Giant);
 		DEVICE_DETACH(dev);
+		mtx_unlock(&Giant);
 
+		free(devsc->vtmb_mmio.res[0], M_DEVBUF);
+		/*
 		bus_release_resource(dev, SYS_RES_MEMORY, 0,
 				devsc->vtmb_mmio.res[0]);
+				*/
 		device_delete_child(vtbounce_parent, dev);
 	}
 
@@ -483,20 +494,42 @@ virtio_bounce_create_transport(device_t parent, struct vtbounce_softc *vtbsc)
 {
 	struct vtmmio_bounce_softc *sc;
 	struct vtmmio_softc *mmiosc;
+	struct resource *res;
 	device_t transport;
-	int rid = 0;
+
+	int uid = 0;
+
+	global_tracking = 1;
+	VTBOUNCE_WARN("%p", parent);
+	/* 
+	 * Create an instance of the emulated mmio transport. The RAM pseudobus
+	 * does not have any bus method pointers, so directly call the generic
+	 * functions.
+	 * XXX Move this to the RAM pseudobus.
+	 * XXX The RAM pseudobus is not fleshed out enough for this.
+	 */
+	transport = BUS_ADD_CHILD(parent, 0, vtmmio_bounce_driver.name, uid);
+	VTBOUNCE_WARN("");
 
 	VTBOUNCE_WARN("");
-	/* Create an instance of the emulated mmio transport. */
-	transport = BUS_ADD_CHILD(parent, 0, vtmmio_bounce_driver.name, -1);
-	VTBOUNCE_WARN("");
-	bus_set_resource(transport, SYS_RES_MEMORY, rid,
-			vtbsc->vtb_phys, vtbsc->vtb_bytes);
-	VTBOUNCE_WARN("");
 	device_set_driver(transport, vtbounce_driver);
+	global_tracking = 0;
 
 	sc = device_get_softc(transport);
 	mmiosc = &sc->vtmb_mmio;
+
+	/* 
+	 * XXX Hack. Create the resource out of thin air to
+	 * keep the bus_write_* calls working. Ideally we would
+	 * be reserving the resource out of the RAM pseudobus,
+	 * but it has no implementation for resource management
+	 * and multiple arch-specific implementations. Changing
+	 * it would require significant effort.
+	 */
+	res = malloc(sizeof(*res), M_DEVBUF, M_WAITOK);
+	res->r_bushandle = vtbsc->vtb_baseaddr;
+	res->r_bustag = X86_BUS_SPACE_MEM;
+	mmiosc->res[0] = res;
 
 	VTBOUNCE_WARN("Bus %p\n", mmiosc->res[0]);
 	VTBOUNCE_WARN("Handle %p\n", (void *)mmiosc->res[0]->r_bushandle);
@@ -534,7 +567,7 @@ virtio_bounce_linkup_transport(struct vtbounce_softc *vtbsc, device_t dev)
  * for the emulated transport, and for the virtio device. These are
  * normally initialized at boot time using vtmmio_probe/vtmmio_attach,
  * and vtmmio_probe_and_attach_child, respectively. We do this initialization
- * here because we are dynamically creating the devices after booting, so 
+ * here becauseewe are dynamically creating the devices after booting, so 
  * we must manually invoke the Newbus methods.
  */
 static int
@@ -574,9 +607,15 @@ err:
 
 	mmiosc = device_get_softc(transport);
 
+	/*
 	bus_release_resource(transport, SYS_RES_MEMORY, 0,
 			mmiosc->vtmb_mmio.res[0]);
+			*/
+	free(mmiosc->vtmb_mmio.res[0], M_DEVBUF);
+	mtx_lock(&Giant);
 	device_delete_child(vtbounce_parent, transport);
+	mtx_unlock(&Giant);
+	vtbsc->vtb_dev = NULL;
 
 	return (error);
 }

@@ -562,16 +562,20 @@ static void
 ram_identify(driver_t *driver, device_t parent)
 {
 
+	printf("RAM DEVICE %s:%d\n", __func__, __LINE);
 	if (resource_disabled("ram", 0))
 		return;
+	printf("RAM DEVICE %s:%d\n", __func__, __LINE);
 	if (BUS_ADD_CHILD(parent, 0, "ram", 0) == NULL)
 		panic("ram_identify");
+	printf("RAM DEVICE %s:%d\n", __func__, __LINE);
 }
 
 static int
 ram_probe(device_t dev)
 {
 
+	printf("RAM DEVICE %s:%d\n", __func__, __LINE);
 	device_quiet(dev);
 	device_set_desc(dev, "System RAM");
 	return (BUS_PROBE_SPECIFIC);
@@ -584,6 +588,7 @@ ram_attach(device_t dev)
 	rman_res_t start, end;
 	int rid, i;
 
+	printf("RAM DEVICE %s\n", dev);
 	rid = 0;
 
 	/* Get the avail list. */
@@ -606,6 +611,8 @@ ram_attach(device_t dev)
 			panic("ram_attach: resource %d failed to attach", rid);
 		rid++;
 	}
+
+	bus_generic_probe(dev);
 
 	return (0);
 }

@@ -70,6 +70,7 @@ SYSCTL_ROOT_NODE(OID_AUTO, dev, CTLFLAG_RW | CTLFLAG_MPSAFE, NULL,
 static bool disable_failed_devs = false;
 SYSCTL_BOOL(_hw_bus, OID_AUTO, disable_failed_devices, CTLFLAG_RWTUN, &disable_failed_devs,
     0, "Do not retry attaching devices that return an error from DEVICE_ATTACH the first time");
+extern int global_tracking;
 
 /*
  * Used to attach drivers to devclasses.
@@ -1154,14 +1155,23 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 
 	PDEBUG(("unit %d in devclass %s", unit, DEVCLANAME(dc)));
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	/* Ask the parent bus if it wants to wire this device. */
 	if (unit == -1)
 		BUS_HINT_DEVICE_UNIT(device_get_parent(dev), dev, dc->name,
 		    &unit);
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	/* If we were given a wired unit number, check for existing device */
 	/* XXX imp XXX */
 	if (unit != -1) {
+		if (global_tracking != 0) {
+			printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+		}
 		if (unit >= 0 && unit < dc->maxunit &&
 		    dc->devices[unit] != NULL) {
 			if (bootverbose)
@@ -1170,6 +1180,9 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 			return (EEXIST);
 		}
 	} else {
+		if (global_tracking != 0) {
+			printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+		}
 		/* Unwired device, find the next available slot for it */
 		unit = 0;
 		for (unit = 0;; unit++) {
@@ -1186,6 +1199,9 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 		}
 	}
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	/*
 	 * We've selected a unit beyond the length of the table, so let's
 	 * extend the table to make room for all units up to and including
@@ -1209,6 +1225,9 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 		dc->maxunit = newsize;
 		if (oldlist != NULL)
 			free(oldlist, M_BUS);
+	}
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
 	}
 	PDEBUG(("now: unit %d in devclass %s", unit, DEVCLANAME(dc)));
 
@@ -1239,6 +1258,9 @@ devclass_add_device(devclass_t dc, device_t dev)
 
 	PDEBUG(("%s in devclass %s", DEVICENAME(dev), DEVCLANAME(dc)));
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	buflen = snprintf(NULL, 0, "%s%d$", dc->name, INT_MAX);
 	if (buflen < 0)
 		return (ENOMEM);
@@ -1246,15 +1268,24 @@ devclass_add_device(devclass_t dc, device_t dev)
 	if (!dev->nameunit)
 		return (ENOMEM);
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	if ((error = devclass_alloc_unit(dc, dev, &dev->unit)) != 0) {
 		free(dev->nameunit, M_BUS);
 		dev->nameunit = NULL;
 		return (error);
 	}
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	dc->devices[dev->unit] = dev;
 	dev->devclass = dc;
 	snprintf(dev->nameunit, buflen, "%s%d", dc->name, dev->unit);
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	return (0);
 }
 
@@ -1424,19 +1455,35 @@ device_add_child_ordered(device_t dev, u_int order, const char *name, int unit)
 	device_t child;
 	device_t place;
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	PDEBUG(("%s at %s with order %u as unit %d",
 	    name, DEVICENAME(dev), order, unit));
 	KASSERT(name != NULL || unit == -1,
 	    ("child device with wildcard name and specific unit number"));
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	child = make_device(dev, name, unit);
 	if (child == NULL)
 		return (child);
 	child->order = order;
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d %p \n", __func__, __LINE__, dev);
+		printf("[TRACKING] %s:%d %p \n", __func__, __LINE__, &dev->children);
+	}
 
 	TAILQ_FOREACH(place, &dev->children, link) {
+		if (global_tracking != 0) {
+			printf("[TRACKING] %s:%d %p \n", __func__, __LINE__, &dev->children);
+		}
 		if (place->order > order)
 			break;
+	}
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
 	}
 
 	if (place) {
@@ -1453,7 +1500,13 @@ device_add_child_ordered(device_t dev, u_int order, const char *name, int unit)
 		TAILQ_INSERT_TAIL(&dev->children, child, link);
 	}
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	bus_data_generation_update();
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	return (child);
 }
 
@@ -2329,23 +2382,38 @@ device_set_devclass(device_t dev, const char *classname)
 	devclass_t dc;
 	int error;
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	if (!classname) {
 		if (dev->devclass)
 			devclass_delete_device(dev->devclass, dev);
 		return (0);
 	}
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	if (dev->devclass) {
 		printf("device_set_devclass: device class already set\n");
 		return (EINVAL);
 	}
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	dc = devclass_find_internal(classname, NULL, TRUE);
 	if (!dc)
 		return (ENOMEM);
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	error = devclass_add_device(dc, dev);
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	bus_data_generation_update();
 	return (error);
 }
@@ -3322,9 +3390,13 @@ resource_list_purge(struct resource_list *rl)
 	}
 }
 
+
 device_t
 bus_generic_add_child(device_t dev, u_int order, const char *name, int unit)
 {
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d %p\n", __func__, __LINE__, dev);
+	}
 	return (device_add_child_ordered(dev, order, name, unit));
 }
 
@@ -4134,11 +4206,20 @@ bus_generic_rl_set_resource(device_t dev, device_t child, int type, int rid,
 {
 	struct resource_list *		rl = NULL;
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	rl = BUS_GET_RESOURCE_LIST(dev, child);
 	if (!rl)
 		return (EINVAL);
 
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 	resource_list_add(rl, type, rid, start, (start + count - 1), count);
+	if (global_tracking != 0) {
+		printf("[TRACKING] %s:%d\n", __func__, __LINE__);
+	}
 
 	return (0);
 }

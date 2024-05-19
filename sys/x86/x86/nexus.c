@@ -625,18 +625,24 @@ static void
 ram_identify(driver_t *driver, device_t parent)
 {
 
+	printf("%s:%d RAM\n", __func__, __LINE__);
 	if (resource_disabled("ram", 0))
 		return;	
+	printf("%s:%d RAM\n", __func__, __LINE__);
 	if (BUS_ADD_CHILD(parent, 0, "ram", 0) == NULL)
 		panic("ram_identify");
+	printf("%s:%d RAM\n", __func__, __LINE__);
 }
 
 static int
 ram_probe(device_t dev)
 {
 
+	printf("%s:%d RAM\n", __func__, __LINE__);
 	device_quiet(dev);
+	printf("%s:%d RAM\n", __func__, __LINE__);
 	device_set_desc(dev, "System RAM");
+	printf("%s:%d RAM\n", __func__, __LINE__);
 	return (0);
 }
 
@@ -651,6 +657,7 @@ ram_attach(device_t dev)
 	uint32_t smapsize;
 	int error, rid;
 
+	printf("%s:%d RAM\n", __func__, __LINE__);
 	/* Retrieve the system memory map from the loader. */
 	kmdp = preload_search_by_type("elf kernel");
 	if (kmdp == NULL)
@@ -683,9 +690,12 @@ ram_attach(device_t dev)
 				    rid);
 			rid++;
 		}
+		bus_generic_probe(dev);
+		printf("%s:%d RAM\n", __func__, __LINE__);
 		return (0);
 	}
 
+	printf("%s:%d RAM\n", __func__, __LINE__);
 	/*
 	 * If the system map is not available, fall back to using
 	 * dump_avail[].  We use the dump_avail[] array rather than
@@ -709,11 +719,17 @@ ram_attach(device_t dev)
 		if (res == NULL)
 			panic("ram_attach: resource %d failed to attach", rid);
 	}
+	printf("%s:%d RAM\n", __func__, __LINE__);
+	bus_generic_probe(dev);
 	return (0);
 }
 
 static device_method_t ram_methods[] = {
 	/* Device interface */
+	DEVMETHOD(bus_add_child,	bus_generic_add_child),
+	DEVMETHOD(bus_set_resource,	bus_generic_rl_set_resource),
+	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
+
 	DEVMETHOD(device_identify,	ram_identify),
 	DEVMETHOD(device_probe,		ram_probe),
 	DEVMETHOD(device_attach,	ram_attach),
