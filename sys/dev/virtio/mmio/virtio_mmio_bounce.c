@@ -282,6 +282,11 @@ vtmmio_bounce_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *i
 
 static device_method_t vtmmio_bounce_methods[] = {
         /* Device interface. */
+	DEVMETHOD(bus_add_child,		bus_generic_add_child),
+	DEVMETHOD(bus_alloc_resource,		bus_generic_alloc_resource),
+	DEVMETHOD(bus_release_resource,		bus_generic_release_resource),
+	DEVMETHOD(bus_print_child,		bus_generic_print_child),
+
 	DEVMETHOD(device_attach,		vtmmio_bounce_attach),
 	DEVMETHOD(device_identify,		vtmmio_bounce_identify),
 	DEVMETHOD(device_probe,			vtmmio_bounce_probe),
@@ -294,7 +299,7 @@ static device_method_t vtmmio_bounce_methods[] = {
 
 DEFINE_CLASS_1(virtio_mmio, vtmmio_bounce_driver, vtmmio_bounce_methods,
     sizeof(struct vtbounce_softc), vtmmio_driver);
-DRIVER_MODULE(vtmmio_bounce, nexus, vtmmio_bounce_driver, 0, 0);
+DRIVER_MODULE(vtmmio_bounce, ram, vtmmio_bounce_driver, 0, 0);
 
 static struct cdev *bouncedev;
 
@@ -343,6 +348,7 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 	VTBOUNCE_WARN("\n");
 	sc->vtb_baseaddr = baseaddr;
 	sc->vtb_bytes = bytes;
+	sc->vtb_phys = m->phys_addr;
 
 	return (0);
 }
@@ -480,10 +486,13 @@ virtio_bounce_create_transport(device_t parent, struct vtbounce_softc *vtbsc)
 	device_t transport;
 	int rid = 0;
 
+	VTBOUNCE_WARN("");
 	/* Create an instance of the emulated mmio transport. */
 	transport = BUS_ADD_CHILD(parent, 0, vtmmio_bounce_driver.name, -1);
+	VTBOUNCE_WARN("");
 	bus_set_resource(transport, SYS_RES_MEMORY, rid,
 			vtbsc->vtb_phys, vtbsc->vtb_bytes);
+	VTBOUNCE_WARN("");
 	device_set_driver(transport, vtbounce_driver);
 
 	sc = device_get_softc(transport);
