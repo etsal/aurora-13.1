@@ -88,6 +88,7 @@ struct vtbounce_softc {
 	vm_ooffset_t		vtb_baseaddr;
 	size_t			vtb_bytes;
 	size_t			vtb_allocated;
+	size_t			vtb_phys;
 
 	virtqueue_intr_t	*vtb_intr;
 	void			*vtb_intr_arg;
@@ -221,14 +222,14 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	case VIRTIO_MMIO_QUEUE_DESC_HIGH:
 	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
 	case VIRTIO_MMIO_QUEUE_USED_HIGH:
-		value = (val - vtophys(vtbsc->vtb_baseaddr)) >> 32;
+		value = (val - vtbsc->vtb_phys) >> 32;
 		bus_write_4(sc->vtmb_mmio.res[0], offset, value);
 		return (1);
 
 	case VIRTIO_MMIO_QUEUE_DESC_LOW:
 	case VIRTIO_MMIO_QUEUE_AVAIL_LOW:
 	case VIRTIO_MMIO_QUEUE_USED_LOW:
-		value = val - vtophys(vtbsc->vtb_baseaddr);
+		value = val - vtbsc->vtb_phys;
 		bus_write_4(sc->vtmb_mmio.res[0], offset, value);
 		return (1);
 	}
@@ -330,14 +331,9 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 	}
 	VTBOUNCE_WARN("Page physical address %lx\n", m->phys_addr);
 
-#ifdef __amd64__
-	baseaddr = KERNBASE;
-#else
-	baseaddr = VM_MIN_KERNEL_ADDRESS;
-#endif
 
-	VTBOUNCE_WARN("\n");
-	error = vm_map_find(kernel_map, obj, 0, &baseaddr, bytes, 0,
+	baseaddr = VM_MIN_KERNEL_ADDRESS;
+	error = vm_map_find(kernel_map, obj, 0, &baseaddr, bytes, VM_MAX_KERNEL_ADDRESS,
 		VMFS_OPTIMAL_SPACE, VM_PROT_ALL, VM_PROT_ALL, 0);
 	if (error != KERN_SUCCESS) {
 		vm_object_deallocate(obj);
@@ -487,7 +483,7 @@ virtio_bounce_create_transport(device_t parent, struct vtbounce_softc *vtbsc)
 	/* Create an instance of the emulated mmio transport. */
 	transport = BUS_ADD_CHILD(parent, 0, vtmmio_bounce_driver.name, -1);
 	bus_set_resource(transport, SYS_RES_MEMORY, rid,
-			vtophys(vtbsc->vtb_baseaddr), vtbsc->vtb_bytes);
+			vtbsc->vtb_phys, vtbsc->vtb_bytes);
 	device_set_driver(transport, vtbounce_driver);
 
 	sc = device_get_softc(transport);
