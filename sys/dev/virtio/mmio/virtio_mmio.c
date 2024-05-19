@@ -684,7 +684,9 @@ vtmmio_get_status(device_t dev)
 {
 	struct vtmmio_softc *sc;
 
+	printf("Device %p \n", dev);
 	sc = device_get_softc(dev);
+	printf("Sc %p \n", sc);
 
 	return (vtmmio_read_config_4(sc, VIRTIO_MMIO_STATUS));
 }
@@ -694,12 +696,16 @@ vtmmio_set_status(device_t dev, uint8_t status)
 {
 	struct vtmmio_softc *sc;
 
+	printf("Device %p \n", dev);
 	sc = device_get_softc(dev);
+	printf("Softc %p \n", sc);
 
 	if (status != VIRTIO_CONFIG_STATUS_RESET)
 		status |= vtmmio_get_status(dev);
+	printf("Done \n");
 
 	vtmmio_write_config_4(sc, VIRTIO_MMIO_STATUS, status);
+	printf("AFDSF Done \n");
 }
 
 static void

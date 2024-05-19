@@ -296,6 +296,7 @@ mevent_add_state(int tfd, enum ev_type type, mevent_cb_t *func, void *param,
 
 	mevp = NULL;
 
+	printf("%s:%d type %d\n", __func__, __LINE__, type);
 	pthread_once(&mevent_once, mevent_init);
 
 	mevent_qlock();
@@ -534,6 +535,7 @@ mevent_dispatch(void)
 	assert(pipev != NULL);
 
 	for (;;) {
+		printf("%s:%d\n", __func__, __LINE__);
 		/*
 		 * Build changelist if required.
 		 * XXX the changelist can be put into the blocking call
@@ -548,6 +550,7 @@ mevent_dispatch(void)
 			}
 		}
 
+		printf("%s:%d\n", __func__, __LINE__);
 		/*
 		 * Block awaiting events
 		 */
@@ -556,9 +559,11 @@ mevent_dispatch(void)
 			perror("Error return from kevent monitor");
 		}
 
+		printf("%s:%d\n", __func__, __LINE__);
 		/*
 		 * Handle reported events
 		 */
 		mevent_handle(eventlist, ret);
+		printf("%s:%d\n", __func__, __LINE__);
 	}
 }

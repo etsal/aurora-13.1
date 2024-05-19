@@ -414,13 +414,17 @@ mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 	struct mmio_vtblk_softc *sc = (struct mmio_vtblk_softc *)arg;
 	struct mmio_devinst *mdi = sc->vbsc_vs.vs_mi;
 
+	printf("Triggered read event\n");
 	assert(fd == mdi->mi_fd);
 	assert(type == EVF_READ);
 
+	printf("2\n");
 	vi_mmio_write(&sc->vbsc_vs, offset);
 	
+	printf("3\n");
 	/* Let in-progress operations continue.  */
 	ioctl(mdi->mi_fd, VIRTIO_BOUNCE_ACK);
+	printf("4\n");
 }
 
 static int
@@ -519,13 +523,9 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	sc->vbsc_cfg.max_discard_seg = VTBLK_MAX_DISCARD_SEG;
 	sc->vbsc_cfg.discard_sector_alignment = MAX(sectsz, sts) / VTBLK_BSIZE;
 
-	/* XXX Make sure we do not need to set up anything else*/
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VERSION, 0x2);
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_DEVICE_ID, VIRTIO_DEV_BLOCK);
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
-
+	printf("Adding read event\n");
 	mevent_add(mdi->mi_fd, EVF_READ, mmio_vtblk_event, sc);
+	printf("Added read event\n");
 	blockif_register_resize_callback(sc->bc, mmio_vtblk_resized, sc);
 
 	return (0);

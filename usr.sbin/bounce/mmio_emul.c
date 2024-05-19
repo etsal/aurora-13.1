@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,7 @@
 #include "config.h"
 #include "debug.h"
 #include "mmio_emul.h"
+#include "virtio.h"
 
 SET_DECLARE(mmio_devemu_set, struct mmio_devemu);
 
@@ -34,11 +36,26 @@ mmio_emul_finddev(const char *name)
 	return (NULL);
 }
 
+static void *
+mmio_emul_driver_init(void *arg)
+{
+	int error;
+	int fd = (int)(long)arg;
+
+	error = ioctl(fd, VIRTIO_BOUNCE_INIT);
+	if (error < 0) {
+		EPRINTLN("Control device initialization error: %s",
+		    strerror(errno));
+		exit(1);
+	}
+	pthread_exit(NULL);
+}
+
 static int
 mmio_emul_control_init(struct mmio_devinst *mdi)
 {
+	pthread_t thread;
 	char *mmio;
-	int error;
 	int fd;
 
 	fd = open(MMIO_CTRDEV, O_RDWR);
@@ -57,19 +74,21 @@ mmio_emul_control_init(struct mmio_devinst *mdi)
 		return (-1);
 	}
 
-	error = ioctl(fd, VIRTIO_BOUNCE_INIT);
-	if (error < 0) {
-		EPRINTLN("Control device initialization error: %s",
-		    strerror(errno));
-		munmap(mmio, MMIO_TOTAL_SIZE);
-		close(fd);
-		return (-1);
-	}
-
 	mdi->mi_fd = fd;
 	mdi->mi_addr = mmio;
 	mdi->mi_bytes = MMIO_TOTAL_SIZE;
-	return (0);
+
+	/* XXX Find the device type based on the environment. */
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VERSION, 0x2);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_DEVICE_ID, VIRTIO_DEV_BLOCK);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
+
+	/* 
+	 * Make the ioctl out of band, because we wll use this thread to to service 
+	 * the register the writes triggered by the driver during device attach.
+	 */
+	return (pthread_create(&thread, NULL, mmio_emul_driver_init, (void *)(long)fd));
 }
 
 static int

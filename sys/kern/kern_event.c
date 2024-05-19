@@ -2359,6 +2359,8 @@ kqueue_wakeup(struct kqueue *kq)
 	}
 }
 
+extern int global_tracking;
+
 /*
  * Walk down a list of knotes, activating them if their event has triggered.
  *
@@ -2374,14 +2376,22 @@ knote(struct knlist *list, long hint, int lockflags)
 	struct knote *kn, *tkn;
 	int error;
 
+	if (global_tracking != 0)
+		printf("%s%d\n", __func__, __LINE__);
 	if (list == NULL)
 		return;
 
+	if (global_tracking != 0)
+		printf("%s%d\n", __func__, __LINE__);
 	KNL_ASSERT_LOCK(list, lockflags & KNF_LISTLOCKED);
 
+	if (global_tracking != 0)
+		printf("%s%d\n", __func__, __LINE__);
 	if ((lockflags & KNF_LISTLOCKED) == 0)
 		list->kl_lock(list->kl_lockarg); 
 
+	if (global_tracking != 0)
+		printf("%s%d\n", __func__, __LINE__);
 	/*
 	 * If we unlock the list lock (and enter influx), we can
 	 * eliminate the kqueue scheduling, but this will introduce
@@ -2390,9 +2400,13 @@ knote(struct knlist *list, long hint, int lockflags)
 	 * or other threads could remove events.
 	 */
 	SLIST_FOREACH_SAFE(kn, &list->kl_list, kn_selnext, tkn) {
+		if (global_tracking != 0)
+			printf("%s%d\n", __func__, __LINE__);
 		kq = kn->kn_kq;
 		KQ_LOCK(kq);
 		if (kn_in_flux(kn) && (kn->kn_status & KN_SCAN) == 0) {
+			if (global_tracking != 0)
+				printf("%s%d\n", __func__, __LINE__);
 			/*
 			 * Do not process the influx notes, except for
 			 * the influx coming from the kq unlock in the
@@ -2403,6 +2417,8 @@ knote(struct knlist *list, long hint, int lockflags)
 			 */
 			KQ_UNLOCK(kq);
 		} else if ((lockflags & KNF_NOKQLOCK) != 0) {
+			if (global_tracking != 0)
+				printf("%s%d\n", __func__, __LINE__);
 			kn_enter_flux(kn);
 			KQ_UNLOCK(kq);
 			error = kn->kn_fop->f_event(kn, hint);
@@ -2412,6 +2428,8 @@ knote(struct knlist *list, long hint, int lockflags)
 				KNOTE_ACTIVATE(kn, 1);
 			KQ_UNLOCK_FLUX(kq);
 		} else {
+			if (global_tracking != 0)
+				printf("%s%d\n", __func__, __LINE__);
 			if (kn->kn_fop->f_event(kn, hint))
 				KNOTE_ACTIVATE(kn, 1);
 			KQ_UNLOCK(kq);
@@ -2419,6 +2437,9 @@ knote(struct knlist *list, long hint, int lockflags)
 	}
 	if ((lockflags & KNF_LISTLOCKED) == 0)
 		list->kl_unlock(list->kl_lockarg); 
+
+	if (global_tracking != 0)
+		printf("%s%d\n", __func__, __LINE__);
 }
 
 /*
