@@ -187,7 +187,7 @@ struct mmio_vtblk_softc {
 	struct virtio_softc vbsc_vs;
 	pthread_mutex_t vsc_mtx;
 	struct vqueue_info vbsc_vq;
-	struct vtblk_config vbsc_cfg;
+	struct vtblk_config *vbsc_cfg;
 	struct virtio_consts vbsc_consts;
 	struct blockif_ctxt *bc;
 	char vbsc_ident[VTBLK_BLK_ID_BYTES];
@@ -397,7 +397,7 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 
 	sc = arg;
 
-	sc->vbsc_cfg.vbc_capacity = new_size / VTBLK_BSIZE; /* 512-byte units */
+	sc->vbsc_cfg->vbc_capacity = new_size / VTBLK_BSIZE; /* 512-byte units */
 	/* XXX Handle resizing: 
 	 *
 	 * - Update the status register to be an interrupt .
@@ -414,17 +414,13 @@ mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 	struct mmio_vtblk_softc *sc = (struct mmio_vtblk_softc *)arg;
 	struct mmio_devinst *mdi = sc->vbsc_vs.vs_mi;
 
-	printf("Triggered read event\n");
 	assert(fd == mdi->mi_fd);
 	assert(type == EVF_READ);
 
-	printf("2\n");
 	vi_mmio_write(&sc->vbsc_vs, offset);
 	
-	printf("3\n");
 	/* Let in-progress operations continue.  */
 	ioctl(mdi->mi_fd, VIRTIO_BOUNCE_ACK);
-	printf("4\n");
 }
 
 static int
@@ -454,7 +450,10 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	sectsz = blockif_sectsz(bctxt);
 	blockif_psectsz(bctxt, &sts, &sto);
 
+	printf("Initializing \n");
 	sc = calloc(1, sizeof(struct mmio_vtblk_softc));
+	sc->vbsc_cfg = (struct vtblk_config *)((uint64_t)mdi->mi_addr + VIRTIO_MMIO_CONFIG);
+
 	sc->bc = bctxt;
 	for (i = 0; i < VTBLK_RINGSZ; i++) {
 		struct mmio_vtblk_ioreq *io = &sc->vbsc_ios[i];
@@ -497,8 +496,8 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	}
 
 	/* setup virtio block config space */
-	sc->vbsc_cfg.vbc_capacity = size / VTBLK_BSIZE; /* 512-byte units */
-	sc->vbsc_cfg.vbc_size_max = 0;	/* not negotiated */
+	sc->vbsc_cfg->vbc_capacity = size / VTBLK_BSIZE; /* 512-byte units */
+	sc->vbsc_cfg->vbc_size_max = 0;	/* not negotiated */
 
 	/*
 	 * If Linux is presented with a seg_max greater than the virtio queue
@@ -507,25 +506,24 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	 * heed to the two extra descriptors needed for the header and status
 	 * of a request.
 	 */
-	sc->vbsc_cfg.vbc_seg_max = MIN(VTBLK_RINGSZ - 2, BLOCKIF_IOV_MAX);
-	sc->vbsc_cfg.vbc_geometry.cylinders = 0;	/* no geometry */
-	sc->vbsc_cfg.vbc_geometry.heads = 0;
-	sc->vbsc_cfg.vbc_geometry.sectors = 0;
-	sc->vbsc_cfg.vbc_blk_size = sectsz;
-	sc->vbsc_cfg.vbc_topology.physical_block_exp =
+	printf("Set config\n");
+	sc->vbsc_cfg->vbc_seg_max = MIN(VTBLK_RINGSZ - 2, BLOCKIF_IOV_MAX);
+	sc->vbsc_cfg->vbc_geometry.cylinders = 0;	/* no geometry */
+	sc->vbsc_cfg->vbc_geometry.heads = 0;
+	sc->vbsc_cfg->vbc_geometry.sectors = 0;
+	sc->vbsc_cfg->vbc_blk_size = sectsz;
+	sc->vbsc_cfg->vbc_topology.physical_block_exp =
 	    (sts > sectsz) ? (ffsll(sts / sectsz) - 1) : 0;
-	sc->vbsc_cfg.vbc_topology.alignment_offset =
+	sc->vbsc_cfg->vbc_topology.alignment_offset =
 	    (sto != 0) ? ((sts - sto) / sectsz) : 0;
-	sc->vbsc_cfg.vbc_topology.min_io_size = 0;
-	sc->vbsc_cfg.vbc_topology.opt_io_size = 0;
-	sc->vbsc_cfg.vbc_writeback = 0;
-	sc->vbsc_cfg.max_discard_sectors = VTBLK_MAX_DISCARD_SECT;
-	sc->vbsc_cfg.max_discard_seg = VTBLK_MAX_DISCARD_SEG;
-	sc->vbsc_cfg.discard_sector_alignment = MAX(sectsz, sts) / VTBLK_BSIZE;
+	sc->vbsc_cfg->vbc_topology.min_io_size = 0;
+	sc->vbsc_cfg->vbc_topology.opt_io_size = 0;
+	sc->vbsc_cfg->vbc_writeback = 0;
+	sc->vbsc_cfg->max_discard_sectors = VTBLK_MAX_DISCARD_SECT;
+	sc->vbsc_cfg->max_discard_seg = VTBLK_MAX_DISCARD_SEG;
+	sc->vbsc_cfg->discard_sector_alignment = MAX(sectsz, sts) / VTBLK_BSIZE;
 
-	printf("Adding read event\n");
 	mevent_add(mdi->mi_fd, EVF_READ, mmio_vtblk_event, sc);
-	printf("Added read event\n");
 	blockif_register_resize_callback(sc->bc, mmio_vtblk_resized, sc);
 
 	return (0);
@@ -547,7 +545,7 @@ mmio_vtblk_cfgread(void *vsc, int offset, int size, uint32_t *retval)
 	void *ptr;
 
 	/* our caller has already verified offset and size */
-	ptr = (uint8_t *)&sc->vbsc_cfg + offset;
+	ptr = (uint8_t *)sc->vbsc_cfg + offset;
 	memcpy(retval, ptr, size);
 	return (0);
 }

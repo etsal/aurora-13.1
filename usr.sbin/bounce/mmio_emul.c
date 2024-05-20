@@ -52,10 +52,11 @@ mmio_emul_driver_init(void *arg)
 }
 
 static int
-mmio_emul_control_init(struct mmio_devinst *mdi)
+mmio_emul_control_init(struct mmio_devinst *mdi, struct mmio_devemu *mde, nvlist_t *nvl)
 {
 	pthread_t thread;
 	char *mmio;
+	int err;
 	int fd;
 
 	fd = open(MMIO_CTRDEV, O_RDWR);
@@ -81,8 +82,12 @@ mmio_emul_control_init(struct mmio_devinst *mdi)
 	/* XXX Find the device type based on the environment. */
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VERSION, 0x2);
-	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_DEVICE_ID, VIRTIO_DEV_BLOCK);
+	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_DEVICE_ID, 0x2);
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VENDOR_ID, VIRTIO_VENDOR);
+
+	err = (mde->me_init)(mdi, nvl);
+	if (err != 0)
+		return (err);
 
 	/* 
 	 * Make the ioctl out of band, because we wll use this thread to to service 
@@ -105,13 +110,7 @@ mmio_emul_init(struct mmio_devemu *mde, nvlist_t *nvl)
 	mdi->mi_state = MIDEV_INVALID;
 	mdi->mi_fd = -1;
 
-	err = mmio_emul_control_init(mdi);
-	if (err != 0) {
-		free(mdi);
-		return (err);
-	}
-
-	err = (*mde->me_init)(mdi, nvl);
+	err = mmio_emul_control_init(mdi, mde, nvl);
 	if (err != 0) {
 		free(mdi);
 		return (err);

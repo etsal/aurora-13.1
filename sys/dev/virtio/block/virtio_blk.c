@@ -360,12 +360,14 @@ vtblk_attach(device_t dev)
 		goto fail;
 	}
 
+	printf("%s:%d\n", __func__, __LINE__);
 	sc->vtblk_sglist = sglist_alloc(sc->vtblk_max_nsegs, M_NOWAIT);
 	if (sc->vtblk_sglist == NULL) {
 		error = ENOMEM;
 		device_printf(dev, "cannot allocate sglist\n");
 		goto fail;
 	}
+	printf("%s:%d\n", __func__, __LINE__);
 
 	/*
 	 * If vtblk_max_nsegs == VTBLK_MIN_SEGMENTS + 1, the device only
@@ -393,6 +395,7 @@ vtblk_attach(device_t dev)
 		device_printf(dev, "cannot create bus dma tag\n");
 		goto fail;
 	}
+	printf("%s:%d\n", __func__, __LINE__);
 
 #ifdef __powerpc__
 	/*
@@ -403,11 +406,13 @@ vtblk_attach(device_t dev)
 	bus_dma_tag_set_iommu(sc->vtblk_dmat, NULL, NULL);
 #endif
 
+	printf("%s:%d\n", __func__, __LINE__);
 	error = vtblk_alloc_virtqueue(sc);
 	if (error) {
 		device_printf(dev, "cannot allocate virtqueue\n");
 		goto fail;
 	}
+	printf("%s:%d\n", __func__, __LINE__);
 
 	error = vtblk_request_prealloc(sc);
 	if (error) {
@@ -415,16 +420,20 @@ vtblk_attach(device_t dev)
 		goto fail;
 	}
 
+	printf("%s:%d\n", __func__, __LINE__);
 	vtblk_alloc_disk(sc, &blkcfg);
 
+	printf("%s:%d\n", __func__, __LINE__);
 	error = virtio_setup_intr(dev, INTR_TYPE_BIO | INTR_ENTROPY);
 	if (error) {
 		device_printf(dev, "cannot setup virtqueue interrupt\n");
 		goto fail;
 	}
+	printf("%s:%d\n", __func__, __LINE__);
 
 	virtqueue_enable_intr(sc->vtblk_vq);
 
+	printf("%s:%d\n", __func__, __LINE__);
 fail:
 	if (error)
 		vtblk_detach(dev);
@@ -516,12 +525,14 @@ vtblk_attach_completed(device_t dev)
 
 	sc = device_get_softc(dev);
 
+	printf("%s:%d\n", __func__, __LINE__);
 	/*
 	 * Create disk after attach as VIRTIO_BLK_T_GET_ID can only be
 	 * processed after the device acknowledged
 	 * VIRTIO_CONFIG_STATUS_DRIVER_OK.
 	 */
 	vtblk_create_disk(sc);
+	printf("%s:%d\n", __func__, __LINE__);
 	return (0);
 }
 

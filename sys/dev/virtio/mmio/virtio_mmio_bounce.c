@@ -107,6 +107,12 @@ struct vtmmio_bounce_softc {
 	struct vtbounce_softc	*vtmb_bounce;
 };
 
+static int
+vtmmio_bounce_poll(device_t dev)
+{
+	return (0);
+}
+
 static void
 vtmmio_bounce_identify(driver_t *driver, device_t parent)
 {
@@ -133,17 +139,11 @@ vtmmio_bounce_probe(device_t dev)
 	struct vtmmio_softc *mmiosc;
 	uint32_t magic, version;
 
-	VTBOUNCE_WARN("\n");
 	sc = device_get_softc(dev);
-	VTBOUNCE_WARN("\n");
 	mmiosc = &sc->vtmb_mmio;
 
-	VTBOUNCE_WARN("\n");
 	/* Fake platform to trigger virtio_mmio_note() on writes. */
 	sc->vtmb_mmio.platform = dev;
-	VTBOUNCE_WARN("\n");
-	VTBOUNCE_WARN("Bus %p\n", mmiosc->res[0]);
-	VTBOUNCE_WARN("Handle %p\n", (void *)mmiosc->res[0]->r_bushandle);
 
 	magic = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_MAGIC_VALUE);
 	if (magic != VIRTIO_MMIO_MAGIC_VIRT) {
@@ -151,18 +151,15 @@ vtmmio_bounce_probe(device_t dev)
 		return (ENXIO);
 	}
 
-	VTBOUNCE_WARN("\n");
 	version = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_VERSION);
 	if (version != 2) {
 		device_printf(dev, "Unsupported version: %#x\n", version);
 		return (ENXIO);
 	}
 
-	VTBOUNCE_WARN("\n");
 	if (vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_DEVICE_ID) == 0)
 		return (ENXIO);
 
-	VTBOUNCE_WARN("\n");
 	device_set_desc(dev, "VirtIO Emulated MMIO adapter");
 
 	return (0);
@@ -175,23 +172,17 @@ vtmmio_bounce_attach(device_t dev)
 	struct vtmmio_softc *mmiosc;
 	device_t child;
 
-	VTBOUNCE_WARN("\n");
 	sc = device_get_softc(dev);
-	VTBOUNCE_WARN("%p\n", sc);
 	mmiosc = &sc->vtmb_mmio;
 
-	VTBOUNCE_WARN("%p %p\n", mmiosc, mmiosc->dev);
 	mmiosc->dev = dev;
 	mmiosc->vtmmio_version = vtmmio_read_config_4(mmiosc, VIRTIO_MMIO_VERSION);
-	VTBOUNCE_WARN("%p %p %x\n", dev, mmiosc, mmiosc->vtmmio_version);
 
 	vtmmio_reset(mmiosc);
 
-	VTBOUNCE_WARN("%p\n", mmiosc);
 	/* Tell the host we've noticed this device. */
 	vtmmio_set_status(dev, VIRTIO_CONFIG_STATUS_ACK);
 
-	VTBOUNCE_WARN("%p\n", mmiosc);
 	/* 
 	 * XXX Use the giant lock only when using device_* API, otherwise
 	 * a bug on bhyve causes a lockup.
@@ -226,8 +217,6 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	sc = device_get_softc(dev);
 	vtbsc = sc->vtmb_bounce;
 	MPASS(vtbsc->vtb_magic == VTBOUNCE_MAGIC);
-
-	VTBOUNCE_WARN("\n");
 
 	/*
 	 * Intercept writes to the QUEUE_{DESC, AVAIL, USED}_{HIGH, LOW} 
@@ -265,14 +254,9 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 		return (1);
 	}
 
-	VTBOUNCE_WARN("\n");
 	mtx_lock(&vtbsc->vtb_mtx);
 	vtbsc->vtb_offset = offset;
-	VTBOUNCE_WARN("%p %lu\n", &vtbsc->vtb_note, offset);
-	global_tracking = 1;
 	KNOTE_LOCKED(&vtbsc->vtb_note, 0);
-	global_tracking = 0;
-	VTBOUNCE_WARN("\n");
 
 	msleep(vtbsc, &vtbsc->vtb_mtx, PRIBIO, "vtmmionote", 0);
 
@@ -298,6 +282,7 @@ vtmmio_bounce_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *i
 	sc->vtb_intr = handler;
 	sc->vtb_intr_arg = ih_user;
 	mtx_unlock(&sc->vtb_mtx);
+	VTBOUNCE_WARN("%p\n", sc);
 
 	return (0);
 }
@@ -313,16 +298,18 @@ static device_method_t vtmmio_bounce_methods[] = {
 	DEVMETHOD(device_identify,		vtmmio_bounce_identify),
 	DEVMETHOD(device_probe,			vtmmio_bounce_probe),
 
+	DEVMETHOD(virtio_mmio_poll,		vtmmio_bounce_poll),
 	DEVMETHOD(virtio_mmio_note,		vtmmio_bounce_note),
 	DEVMETHOD(virtio_mmio_setup_intr,	vtmmio_bounce_setup_intr),
 
         DEVMETHOD_END
 };
 
-DEFINE_CLASS_1(virtio_mmio, vtmmio_bounce_driver, vtmmio_bounce_methods,
+DEFINE_CLASS_1(vtmmio_bounce, vtmmio_bounce_driver, vtmmio_bounce_methods,
     sizeof(struct vtbounce_softc), vtmmio_driver);
 DRIVER_MODULE(vtmmio_bounce, ram, vtmmio_bounce_driver, 0, 0);
 MODULE_DEPEND(vtmmio_bounce, ram, 1, 1, 1);
+MODULE_VERSION(vtmmio_bounce, 1);
 
 static struct cdev *bouncedev;
 
@@ -658,6 +645,7 @@ virtio_bounce_ack(struct vtbounce_softc *sc)
 {
 	VTBOUNCE_WARN("\n");
 	mtx_lock(&sc->vtb_mtx);
+	sc->vtb_offset = 0;
 	wakeup(sc);
 	mtx_unlock(&sc->vtb_mtx);
 }
@@ -757,17 +745,20 @@ virtio_bounce_filt_read(struct knote *kn, long hint)
 
 	VTBOUNCE_WARN("%d \n", curthread->td_tid);
 
+	/* 
+	 * XXX What happens if we have multiple
+	 * threads triggering events? Looks like 
+	 * we need a queue to be consumed by userspace.
+	 */
+
 	sc = (struct vtbounce_softc *)kn->kn_hook;
 	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
 	mtx_assert(&sc->vtb_mtx, MA_OWNED);
 
-	VTBOUNCE_WARN("%lu\n", sc->vtb_offset);
 	if (sc->vtb_offset == 0)
 		return (0);
 
 	kn->kn_data = sc->vtb_offset;
-	//sc->vtb_offset = 0;
-	VTBOUNCE_WARN("\n");
 
 	return (1);
 }
