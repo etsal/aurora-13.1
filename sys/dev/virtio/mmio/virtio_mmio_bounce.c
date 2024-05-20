@@ -38,6 +38,7 @@
 #include <sys/proc.h>
 #include <sys/rman.h>
 #include <sys/rwlock.h>
+#include <sys/selinfo.h>
 #include <sys/stat.h>
 
 #include <vm/vm.h>
@@ -81,6 +82,7 @@ int global_tracking;
  */
 struct vtbounce_softc {
 	struct mtx		vtb_mtx;
+	struct selinfo		vtb_sel;
 	struct knlist		vtb_note;
 	uint32_t		vtb_magic;
 
@@ -88,7 +90,6 @@ struct vtbounce_softc {
 	vm_ooffset_t		vtb_baseaddr;
 	size_t			vtb_bytes;
 	size_t			vtb_allocated;
-	size_t			vtb_phys;
 
 	virtqueue_intr_t	*vtb_intr;
 	void			*vtb_intr_arg;
@@ -96,6 +97,7 @@ struct vtbounce_softc {
 	vm_ooffset_t		vtb_offset;
 
 	device_t		vtb_dev;
+#define vtb_note	vtb_sel.si_note
 };
 
 /*
@@ -106,12 +108,6 @@ struct vtmmio_bounce_softc {
 	struct vtmmio_softc	vtmb_mmio;
 	struct vtbounce_softc	*vtmb_bounce;
 };
-
-static int
-vtmmio_bounce_poll(device_t dev)
-{
-	return (0);
-}
 
 static void
 vtmmio_bounce_identify(driver_t *driver, device_t parent)
@@ -131,6 +127,14 @@ vtmmio_get_vtb(device_t dev)
 
 	return (sc->vtmb_bounce);
 }
+
+static int
+vtmmio_bounce_poll(device_t dev)
+{
+
+	return (0);
+}
+
 
 static int
 vtmmio_bounce_probe(device_t dev)
@@ -212,7 +216,8 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 {
 	struct vtbounce_softc *vtbsc;
 	struct vtmmio_bounce_softc *sc;
-	uint32_t value;
+	uint32_t hi, lo;
+	uint64_t qaddr;
 
 	sc = device_get_softc(dev);
 	vtbsc = sc->vtmb_bounce;
@@ -224,20 +229,44 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	 * of the control region. Do not actually notify userspace of the writes,
 	 * it will be notified once we set VIRTIO_MMIO_QUEUE_READY.
 	 */
+	/* XXX Make this recomputation trigger at VIRTIO_MMIO_QUEUE_READY. */
 	switch (offset) {
 	case VIRTIO_MMIO_QUEUE_DESC_HIGH:
-	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
-	case VIRTIO_MMIO_QUEUE_USED_HIGH:
-		value = (val - vtbsc->vtb_phys) >> 32;
-		bus_write_4(sc->vtmb_mmio.res[0], offset, value);
+		hi = val;
+		lo = bus_read_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_DESC_LOW);
+		qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
+		qaddr -= vtophys(vtbsc->vtb_baseaddr);
+		hi = (qaddr >> 32);
+		lo = (qaddr & ((1ULL << 32) - 1));
+		
+		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_DESC_HIGH, hi);
+		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_DESC_LOW, lo);
 		return (1);
 
-	case VIRTIO_MMIO_QUEUE_DESC_LOW:
-	case VIRTIO_MMIO_QUEUE_AVAIL_LOW:
-	case VIRTIO_MMIO_QUEUE_USED_LOW:
-		value = val - vtbsc->vtb_phys;
-		bus_write_4(sc->vtmb_mmio.res[0], offset, value);
+	case VIRTIO_MMIO_QUEUE_USED_HIGH:
+		hi = val;
+		lo = bus_read_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_USED_LOW);
+		qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
+		qaddr -= vtophys(vtbsc->vtb_baseaddr);
+		hi = (qaddr >> 32);
+		lo = (qaddr & ((1ULL << 32) - 1));
+		
+		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_USED_HIGH, hi);
+		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_USED_LOW, lo);
 		return (1);
+
+	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
+		hi = val;
+		lo = bus_read_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_AVAIL_LOW);
+		qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
+		qaddr -= vtophys(vtbsc->vtb_baseaddr);
+		hi = (qaddr >> 32);
+		lo = (qaddr & ((1ULL << 32) - 1));
+		
+		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_AVAIL_HIGH, hi);
+		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_AVAIL_LOW, lo);
+		return (1);
+
 	}
 
 	/* Only forward the listed register writes to userspace. */
@@ -247,6 +276,7 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	case VIRTIO_MMIO_QUEUE_SEL:
 	case VIRTIO_MMIO_QUEUE_NUM:
 	case VIRTIO_MMIO_QUEUE_READY:
+	case VIRTIO_MMIO_QUEUE_NOTIFY:
 	case VIRTIO_MMIO_INTERRUPT_ACK:
 	case VIRTIO_MMIO_STATUS:
 		break;
@@ -257,6 +287,7 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	mtx_lock(&vtbsc->vtb_mtx);
 	vtbsc->vtb_offset = offset;
 	KNOTE_LOCKED(&vtbsc->vtb_note, 0);
+	selwakeup(&vtbsc->vtb_sel);
 
 	msleep(vtbsc, &vtbsc->vtb_mtx, PRIBIO, "vtmmionote", 0);
 
@@ -321,8 +352,8 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 {
 	vm_object_t obj = sc->vtb_object;
 	size_t bytes = IDX_TO_OFF(obj->size);
-	vm_offset_t baseaddr;
-	vm_page_t m;
+	vm_offset_t baseaddr, tmp;
+	vm_page_t m, end_m;
 	int error;
 
 	/*
@@ -337,7 +368,7 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 	 * the object is used to back the virtqueue descriptor regions.
 	 */
 	VM_OBJECT_WLOCK(obj);
-	m = vm_page_alloc_contig(obj, 0, VM_ALLOC_NORMAL | VM_ALLOC_NOBUSY, obj->size,
+	m = vm_page_alloc_contig(obj, 0, VM_ALLOC_NORMAL | VM_ALLOC_ZERO, obj->size,
 			0, (uint64_t) -1, 1, 0, VM_MEMATTR_DEFAULT);
 	VM_OBJECT_WUNLOCK(obj);
 	if (m == NULL) {
@@ -355,10 +386,21 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 		return (ENOMEM);
 	}
 
+	end_m = m + (bytes / PAGE_SIZE);
+	printf("PHYSICAL ADDRESS %lx\n", m->phys_addr);
+	tmp = baseaddr;
+	for (; m < end_m; m++) {
+		vm_page_valid(m);
+		pmap_enter(kernel_pmap, tmp, m, VM_PROT_RW,
+		    VM_PROT_RW | PMAP_ENTER_WIRED, 0);
+		tmp += PAGE_SIZE;
+		vm_page_xunbusy(m);
+	}
+
+
 	VTBOUNCE_WARN("\n");
 	sc->vtb_baseaddr = baseaddr;
 	sc->vtb_bytes = bytes;
-	sc->vtb_phys = m->phys_addr;
 
 	return (0);
 }
@@ -391,6 +433,7 @@ virtio_bounce_dtor(void *arg)
 
 	VTBOUNCE_WARN("\n");
 	if (sc->vtb_baseaddr != 0) {
+		/* XXX Remove from the pmap */
 		vm_map_remove(kernel_map, sc->vtb_baseaddr,
 			sc->vtb_baseaddr + sc->vtb_bytes);
 	}
@@ -478,15 +521,20 @@ virtio_bounce_ringalloc(device_t dev, size_t size)
 	void *mem;
 
 	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
+	VTBOUNCE_WARN("Allocating 0x%lx, 0x%lx, 0x%lx\n", sc->vtb_allocated, size, sc->vtb_bytes);
 
 	mtx_lock(&sc->vtb_mtx);
 	if (sc->vtb_allocated + size > sc->vtb_bytes) {
+		VTBOUNCE_WARN("Failed to allocate\n");
 		mtx_unlock(&sc->vtb_mtx);
 		return (NULL);
 	}
 	
 	mem = (void *)(sc->vtb_baseaddr + sc->vtb_allocated);
-	sc->vtb_baseaddr += size;
+	/* XXX Zero at allocation time. */
+	bzero(mem, size);
+	VTBOUNCE_WARN("Memory address is %p\n", mem);
+	sc->vtb_allocated += size;
 
 	mtx_unlock(&sc->vtb_mtx);
 
@@ -651,7 +699,7 @@ virtio_bounce_ack(struct vtbounce_softc *sc)
 }
 
 static int
-virtio_bounce_io(struct virtio_bounce_io_args *args)
+virtio_bounce_io(struct vtbounce_softc *sc, struct virtio_bounce_io_args *args)
 {
 	struct virtio_bounce_transfer *tf;
 	caddr_t driver, device;
@@ -659,29 +707,38 @@ virtio_bounce_io(struct virtio_bounce_io_args *args)
 	size_t len;
 	int i;
 
+	VTBOUNCE_WARN("%ld\n", args->cnt);
 	tf = malloc(args->cnt * sizeof(*tf), M_DEVBUF, M_NOWAIT);
 	if (tf == NULL)
 		return (ENOMEM);
 
+	VTBOUNCE_WARN("\n");
 	error = copyin(args->transfers, tf, args->cnt * (sizeof(*tf)));
 	if (error != 0) {
 		free(tf, M_DEVBUF);
 		return (error);
 	}
 
+	VTBOUNCE_WARN("\n");
 	for (i = 0; i < args->cnt; i++) {
-		driver = tf[i].vtbt_driver;
+		driver = (caddr_t)PHYS_TO_DMAP((vm_paddr_t)tf[i].vtbt_driver);
+		/* Translate from physical to kernel virtual. */
+		VTBOUNCE_WARN("%lx %p %lx \n", sc->vtb_baseaddr, tf[i].vtbt_device, vtophys(sc->vtb_baseaddr)); 
 		device = tf[i].vtbt_device;
 		len = tf[i].vtbt_len;
 
+		VTBOUNCE_WARN("\n");
 		if (args->touser)
-			error = copyout(device, driver, len);
+			error = copyout(driver, device, len);
 		else
-			error = copyin(driver, device, len);
+			error = copyin(device, driver, len);
 
+		VTBOUNCE_WARN("%d %p %p %ld \n", error, driver, device, len);
 		if (error != 0)
 			break;
+		VTBOUNCE_WARN("\n");
 	}
+	VTBOUNCE_WARN("\n");
 
 	free(tf, M_DEVBUF);
 
@@ -713,7 +770,7 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, stru
 		virtio_bounce_ack(sc);
 		break;
 	case VIRTIO_BOUNCE_TRANSFER:
-		ret = virtio_bounce_io((struct virtio_bounce_io_args *)data);
+		ret = virtio_bounce_io(sc, (struct virtio_bounce_io_args *)data);
 		break;
 	}
 

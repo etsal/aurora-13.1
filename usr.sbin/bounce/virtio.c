@@ -161,12 +161,12 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 
 	/* Preallocate a descriptor data region for the descriptor */
 	if ((vd->flags & VRING_DESC_F_WRITE) == 0) {
-		if (iove_add(vq->vq_readio, vd->addr, vd->len, iov) != 0)
+		if (iove_add(vq->vq_readio, vd->addr, vd->len, &iov[i]) != 0)
 			return;
 
 		reqp->readable++; 
 	} else {
-		if (iove_add(vq->vq_writeio, vd->addr, vd->len, iov) != 0)
+		if (iove_add(vq->vq_writeio, vd->addr, vd->len, &iov[i]) != 0)
 			return;
 
 		reqp->writable++;
@@ -765,8 +765,34 @@ vi_handle_interrupt_ack(struct virtio_softc *vs, uint32_t ack)
 }
 
 static void
-vi_handle_queue_notify(struct virtio_softc __unused *vs, uint32_t __unused ack)
+vi_handle_queue_notify(struct virtio_softc *vs, uint32_t ind)
 {
+	struct virtio_consts *vc = vs->vs_vc;
+	struct vqueue_info *vq;
+
+	if (ind >= (unsigned int)vc->vc_nvq) {
+		EPRINTLN("%s: queue %d notify out of range",
+			vc->vc_name, ind);
+	}
+
+	printf("Notified\n");
+	vq = &vs->vs_queues[ind];
+	if (vq->vq_notify) {
+		printf("%d Notified\n", __LINE__);
+		(*vq->vq_notify)(DEV_SOFTC(vs), vq);
+		printf("%d Notified\n", __LINE__);
+	} else if (vc->vc_qnotify) {
+		printf("%d Notified\n", __LINE__);
+		(*vc->vc_qnotify)(DEV_SOFTC(vs), vq); 
+		printf("%d Notified\n", __LINE__);
+	} else {
+		printf("%d Notified\n", __LINE__);
+		EPRINTLN("%s: qnotify value %d: missing vq/vc notify",
+			vc->vc_name, ind);
+		printf("%d Notified\n", __LINE__);
+	}
+	printf("Notify done\n");
+
 }
 
 void

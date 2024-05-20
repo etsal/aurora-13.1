@@ -413,16 +413,19 @@ vtblk_attach(device_t dev)
 		goto fail;
 	}
 	printf("%s:%d\n", __func__, __LINE__);
+	virtqueue_nused(sc->vtblk_vq);
 
 	error = vtblk_request_prealloc(sc);
 	if (error) {
 		device_printf(dev, "cannot preallocate requests\n");
 		goto fail;
 	}
+	virtqueue_nused(sc->vtblk_vq);
 
 	printf("%s:%d\n", __func__, __LINE__);
 	vtblk_alloc_disk(sc, &blkcfg);
 
+	virtqueue_nused(sc->vtblk_vq);
 	printf("%s:%d\n", __func__, __LINE__);
 	error = virtio_setup_intr(dev, INTR_TYPE_BIO | INTR_ENTROPY);
 	if (error) {

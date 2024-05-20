@@ -46,9 +46,10 @@ int
 iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov)
 {
 	struct virtio_bounce_transfer *tf = iove->iove_tf;
+	size_t ind = iove->iove_ind;
 	char *base;
 
-	if (iove->iove_ind == iove->iove_maxcnt){
+	if (ind == iove->iove_maxcnt){
 		tf = reallocarray(tf, 2 * iove->iove_maxcnt,
 				sizeof(*tf));
 		if (tf == NULL)
@@ -61,9 +62,9 @@ iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov)
 	if (base == NULL)
 		return (ENOMEM);
 
-	iove->iove_tf[iove->iove_ind].vtbt_device = base;
-	iove->iove_tf[iove->iove_ind].vtbt_driver = (caddr_t) phys;
-	iove->iove_tf[iove->iove_ind].vtbt_len = len;
+	iove->iove_tf[ind].vtbt_device = base;
+	iove->iove_tf[ind].vtbt_driver = (caddr_t) phys;
+	iove->iove_tf[ind].vtbt_len = len;
 	iove->iove_ind += 1;
 
 	iov->iov_base = base;
@@ -85,6 +86,11 @@ iove_import(struct virtio_softc *vs, struct iov_emul *iove)
 		.cnt = iove->iove_ind,
 		.touser = true,
 	};
+
+	printf("Driver %p\n", args.transfers[args.cnt-1].vtbt_driver);
+	printf("Device %p\n", args.transfers[args.cnt-1].vtbt_device);
+	printf("Length %ld\n", args.transfers[args.cnt-1].vtbt_len);
+	printf("Got %lu transfers\n", args.cnt);
 
 	return (ioctl(fd, VIRTIO_BOUNCE_TRANSFER, &args));
 }
