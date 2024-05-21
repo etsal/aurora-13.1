@@ -509,6 +509,18 @@ vq_endchains(struct vqueue_info *vq, int used_all_avail)
 		vq_interrupt(vs, vq);
 }
 
+void *vq_make_interrupt(void *arg)
+{
+	int fd = (int)(uint64_t)arg;
+	int error;
+
+	error = ioctl(fd, VIRTIO_BOUNCE_KICK);
+	if (error != 0)
+		EPRINTLN("device kick failed with %d\n", error);
+	pthread_exit(NULL);
+
+}
+
 /* Note: these are in sorted order to make for a fast search */
 static struct config_reg {
 	uint16_t	cr_offset;	/* register offset */
