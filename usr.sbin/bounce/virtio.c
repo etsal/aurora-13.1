@@ -104,6 +104,7 @@ vi_reset_dev(struct virtio_softc *vs)
 		vq->vq_last_avail = 0;
 		vq->vq_next_used = 0;
 		vq->vq_save_used = 0;
+		/* XXX Is this right? How should we actually set it? */
 		vq->vq_offset = UINT_MAX;
 	}
 	vs->vs_negotiated_caps = 0;
@@ -120,6 +121,7 @@ vi_reset_dev(struct virtio_softc *vs)
  * The guest just gave us a page frame number, from which we can
  * calculate the addresses of the queue.
  */
+/* XXX Switch it back to using the softc. */
 static void
 vi_vq_init(struct mmio_devinst *mdi, struct vqueue_info *vq)
 {
@@ -159,6 +161,7 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 	if (i >= n_iov)
 		return;
 
+	/* XXX Add error handling. */
 	/* Preallocate a descriptor data region for the descriptor */
 	if ((vd->flags & VRING_DESC_F_WRITE) == 0) {
 		if (iove_add(vq->vq_readio, vd->addr, vd->len, &iov[i]) != 0)

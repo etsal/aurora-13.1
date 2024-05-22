@@ -37,6 +37,7 @@
 
 #include <assert.h>
 
+/* XXX Where did this come from? */
 #define MI_NAMESZ (40)
 
 struct mmio_devinst;
@@ -49,6 +50,7 @@ struct mmio_devemu {
 	void      (*me_write)(struct mmio_devinst *mdi, uint64_t offset,
 				int size, uint32_t value);
 };
+#define MMIO_EMUL_SET(x)   DATA_SET(mmio_devemu_set, x)
 
 enum mmio_devstate {
 	MIDEV_INVALID,
@@ -68,9 +70,8 @@ struct mmio_devinst {
 	int			mi_fd;		/* File descriptor for the region. */
 	enum mmio_devstate	mi_state;	
 };
-#define MMIO_EMUL_SET(x)   DATA_SET(mmio_devemu_set, x)
 
-/* XXX Sensible default until proven otherwise. */
+/* XXX Sensible default until proven otherwise. But we need to link it with the in-kernel definition. */
 #define MMIO_TOTAL_SIZE (1024 * 1024 * 10)
 #define MMIO_CTRDEV ("/dev/virtio_bounce")
 

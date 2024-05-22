@@ -265,7 +265,6 @@ mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 	struct iovec iov[BLOCKIF_IOV_MAX + 2];
 	struct virtio_blk_discard_write_zeroes *discard;
 
-
 	n = vq_getchain(vq, iov, BLOCKIF_IOV_MAX + 2, &req);
 
 	/*
@@ -280,7 +279,6 @@ mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 
 	io = &sc->vbsc_ios[req.idx];
 	assert(req.readable != 0);
-	printf("%ld %ld\n", iov[0].iov_len, sizeof(struct virtio_blk_hdr));
 	assert(iov[0].iov_len == sizeof(struct virtio_blk_hdr));
 	vbh = (struct virtio_blk_hdr *)iov[0].iov_base;
 	memcpy(&io->io_req.br_iov, &iov[1], sizeof(struct iovec) * (n - 2));
@@ -289,7 +287,6 @@ mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 	io->io_status = (uint8_t *)iov[--n].iov_base;
 	assert(req.writable != 0);
 	assert(iov[n].iov_len == 1);
-	printf("%s:%d\n", __func__, __LINE__);
 
 	/*
 	 * XXX
@@ -307,29 +304,22 @@ mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 	 */
 	assert(n == (writeop ? req.readable : req.writable));
 
-	printf("%s:%d\n", __func__, __LINE__);
 	iolen = 0;
 	for (i = 1; i < n; i++) {
 		iolen += iov[i].iov_len;
 	}
 	io->io_req.br_resid = iolen;
 
-	printf("%s:%d\n", __func__, __LINE__);
 	DPRINTF(("virtio-block: %s op, %zd bytes, %d segs, offset %ld",
 		 writeop ? "write/discard" : "read/ident", iolen, i - 1,
 		 io->io_req.br_offset));
 
-	printf("%s:%d\n", __func__, __LINE__);
 	switch (type) {
 	case VBH_OP_READ:
-		printf("%s:%d\n", __func__, __LINE__);
 		err = blockif_read(sc->bc, &io->io_req);
-		printf("%s:%d\n", __func__, __LINE__);
 		break;
 	case VBH_OP_WRITE:
-		printf("%s:%d\n", __func__, __LINE__);
 		err = blockif_write(sc->bc, &io->io_req);
-		printf("%s:%d\n", __func__, __LINE__);
 		break;
 	case VBH_OP_DISCARD:
 		/*
@@ -337,9 +327,7 @@ mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 		 * has submitted a request that doesn't conform to the
 		 * requirements, we return a error.
 		 */
-		printf("%s:%d\n", __func__, __LINE__);
 		if (iov[1].iov_len != sizeof (*discard)) {
-			printf("%s:%d\n", __func__, __LINE__);
 			mmio_vtblk_done_locked(io, EINVAL);
 			return;
 		}
@@ -359,48 +347,37 @@ mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 		 * Currently there are no known flags for a DISCARD request.
 		 */
 		if (discard->flags.unmap != 0 || discard->flags.reserved != 0) {
-			printf("%s:%d\n", __func__, __LINE__);
 			mmio_vtblk_done_locked(io, ENOTSUP);
 			return;
 		}
 
 		/* Make sure the request doesn't exceed our size limit */
 		if (discard->num_sectors > VTBLK_MAX_DISCARD_SECT) {
-			printf("%s:%d\n", __func__, __LINE__);
 			mmio_vtblk_done_locked(io, EINVAL);
 			return;
 		}
 
-		printf("%s:%d\n", __func__, __LINE__);
 		io->io_req.br_offset = discard->sector * VTBLK_BSIZE;
 		io->io_req.br_resid = discard->num_sectors * VTBLK_BSIZE;
 		err = blockif_delete(sc->bc, &io->io_req);
-		printf("%s:%d\n", __func__, __LINE__);
 		break;
 	case VBH_OP_FLUSH:
 	case VBH_OP_FLUSH_OUT:
-		printf("%s:%d\n", __func__, __LINE__);
 		err = blockif_flush(sc->bc, &io->io_req);
-		printf("%s:%d\n", __func__, __LINE__);
 		break;
 	case VBH_OP_IDENT:
-		printf("%s:%d\n", __func__, __LINE__);
 		/* Assume a single buffer */
 		/* S/n equal to buffer is not zero-terminated. */
 		memset(iov[1].iov_base, 0, iov[1].iov_len);
 		strncpy(iov[1].iov_base, sc->vbsc_ident,
 		    MIN(iov[1].iov_len, sizeof(sc->vbsc_ident)));
 		mmio_vtblk_done_locked(io, 0);
-		printf("%s:%d\n", __func__, __LINE__);
 		return;
 	default:
-		printf("%s:%d\n", __func__, __LINE__);
 		mmio_vtblk_done_locked(io, EOPNOTSUPP);
-		printf("%s:%d\n", __func__, __LINE__);
 		return;
 	}
 	assert(err == 0);
-	printf("%s:%d\n", __func__, __LINE__);
 }
 
 static void
@@ -408,12 +385,8 @@ mmio_vtblk_notify(void *vsc, struct vqueue_info *vq)
 {
 	struct mmio_vtblk_softc *sc = vsc;
 
-	printf("%s:%d\n", __func__, __LINE__);
-	while (vq_has_descs(vq)) {
-		printf("%s:%d\n", __func__, __LINE__);
+	while (vq_has_descs(vq))
 		mmio_vtblk_proc(sc, vq);
-	}
-	printf("%s:%d\n", __func__, __LINE__);
 }
 
 static void
@@ -435,6 +408,7 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 	assert(0);
 }
 
+/* XXX This callback is not necessary in bhyve. Determine why it ended up existing. */
 static void
 mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 {
@@ -453,6 +427,7 @@ mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 static int
 mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 {
+	/* XXX This change is unnecessary. Fix this. */
 	char bident[PATH_MAX];
 	struct blockif_ctxt *bctxt;
 	const char *path, *serial;
@@ -477,7 +452,6 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	sectsz = blockif_sectsz(bctxt);
 	blockif_psectsz(bctxt, &sts, &sto);
 
-	printf("Initializing \n");
 	sc = calloc(1, sizeof(struct mmio_vtblk_softc));
 	sc->vbsc_cfg = (struct vtblk_config *)((uint64_t)mdi->mi_addr + VIRTIO_MMIO_CONFIG);
 
@@ -501,7 +475,7 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	sc->vbsc_vs.vs_mtx = &sc->vsc_mtx;
 
 	sc->vbsc_vq.vq_qsize = VTBLK_RINGSZ;
-	/* XXX sc->vbsc_vq.vq_notify = we have no per-queue notify */
+	/* sc->vbsc_vq.vq_notify = we have no per-queue notify */
 
 	/*
 	 * If an explicit identifier is not given, create an
@@ -533,7 +507,6 @@ mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 	 * heed to the two extra descriptors needed for the header and status
 	 * of a request.
 	 */
-	printf("Set config\n");
 	sc->vbsc_cfg->vbc_seg_max = MIN(VTBLK_RINGSZ - 2, BLOCKIF_IOV_MAX);
 	sc->vbsc_cfg->vbc_geometry.cylinders = 0;	/* no geometry */
 	sc->vbsc_cfg->vbc_geometry.heads = 0;
