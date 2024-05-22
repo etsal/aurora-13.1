@@ -208,14 +208,45 @@ vtmmio_bounce_attach(device_t dev)
 	return (0);
 }
 
+/*
+ * Recompute the queue descriptor to be an offset within the shared
+ * bhyve/kernel vq region. Our userspace cannot meaningfully translate 
+ * kernel physical addresses, so we transform the values in the queue
+ * descriptor address registers into offsets. Userspace can add the offset
+ * to its own virtual address for the common region to find the vq.
+ */
+static void
+vtmmio_bounce_qdesc_offset(struct vtmmio_softc *sc, uint64_t baseaddr,
+		int hireg, int loreg)
+{
+	uint32_t hi, lo;
+	uint64_t qaddr;
+
+	/* Read in the components of the physical address. */
+	hi = bus_read_4(sc->res[0], hireg);
+	lo = bus_read_4(sc->res[0], loreg);
+
+	/* Recompute into an offset into the vq control region. */
+	qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
+	qaddr -= vtophys(baseaddr);
+
+	/* Update the register values. */
+	hi = (qaddr >> 32);
+	lo = (qaddr & ((1ULL << 32) - 1));
+	
+	bus_write_4(sc->res[0], hireg, hi);
+	bus_write_4(sc->res[0], loreg, lo);
+}
+
+/* XXX Embed into the softc state. */
+bool qdesc_recompute, qavail_recompute, qused_recompute;
+
 /* Notify userspace of a write, and wait for a response. */
 static int
 vtmmio_bounce_note(device_t dev, size_t offset, int val)
 {
 	struct vtbounce_softc *vtbsc;
 	struct vtmmio_bounce_softc *sc;
-	uint32_t hi, lo;
-	uint64_t qaddr;
 
 	sc = device_get_softc(dev);
 	vtbsc = sc->vtmb_bounce;
@@ -227,44 +258,16 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	 * of the control region. Do not actually notify userspace of the writes,
 	 * it will be notified once we set VIRTIO_MMIO_QUEUE_READY.
 	 */
-	/* XXX Make this recomputation trigger at VIRTIO_MMIO_QUEUE_READY. */
 	switch (offset) {
 	case VIRTIO_MMIO_QUEUE_DESC_HIGH:
-		hi = val;
-		lo = bus_read_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_DESC_LOW);
-		qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
-		qaddr -= vtophys(vtbsc->vtb_baseaddr);
-		hi = (qaddr >> 32);
-		lo = (qaddr & ((1ULL << 32) - 1));
-		
-		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_DESC_HIGH, hi);
-		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_DESC_LOW, lo);
+		qdesc_recompute = 1;
 		return (1);
-
 	case VIRTIO_MMIO_QUEUE_USED_HIGH:
-		hi = val;
-		lo = bus_read_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_USED_LOW);
-		qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
-		qaddr -= vtophys(vtbsc->vtb_baseaddr);
-		hi = (qaddr >> 32);
-		lo = (qaddr & ((1ULL << 32) - 1));
-		
-		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_USED_HIGH, hi);
-		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_USED_LOW, lo);
+		qused_recompute = 1;
 		return (1);
-
 	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
-		hi = val;
-		lo = bus_read_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_AVAIL_LOW);
-		qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
-		qaddr -= vtophys(vtbsc->vtb_baseaddr);
-		hi = (qaddr >> 32);
-		lo = (qaddr & ((1ULL << 32) - 1));
-		
-		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_AVAIL_HIGH, hi);
-		bus_write_4(sc->vtmb_mmio.res[0], VIRTIO_MMIO_QUEUE_AVAIL_LOW, lo);
+		qavail_recompute = 1;
 		return (1);
-
 	}
 
 	/* Only forward the listed register writes to userspace. */
@@ -273,10 +276,29 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	case VIRTIO_MMIO_GUEST_FEATURES:
 	case VIRTIO_MMIO_QUEUE_SEL:
 	case VIRTIO_MMIO_QUEUE_NUM:
-	case VIRTIO_MMIO_QUEUE_READY:
 	case VIRTIO_MMIO_QUEUE_NOTIFY:
 	case VIRTIO_MMIO_INTERRUPT_ACK:
 	case VIRTIO_MMIO_STATUS:
+		break;
+	case VIRTIO_MMIO_QUEUE_READY:
+		/* if changed, transform the offsets. */
+		if (qdesc_recompute) {
+			vtmmio_bounce_qdesc_offset(&sc->vtmb_mmio, vtbsc->vtb_baseaddr,
+				VIRTIO_MMIO_QUEUE_DESC_HIGH, VIRTIO_MMIO_QUEUE_DESC_LOW);
+			qdesc_recompute = 0;
+		}
+
+		if (qused_recompute) {
+			vtmmio_bounce_qdesc_offset(&sc->vtmb_mmio, vtbsc->vtb_baseaddr,
+				VIRTIO_MMIO_QUEUE_USED_HIGH, VIRTIO_MMIO_QUEUE_USED_LOW);
+			qused_recompute = 0;
+		}
+
+		if (qavail_recompute) {
+			vtmmio_bounce_qdesc_offset(&sc->vtmb_mmio, vtbsc->vtb_baseaddr,
+				VIRTIO_MMIO_QUEUE_AVAIL_HIGH, VIRTIO_MMIO_QUEUE_AVAIL_LOW);
+			qavail_recompute = 0;
+		}
 		break;
 	default:
 		return (1);
