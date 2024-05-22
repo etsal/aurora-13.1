@@ -771,7 +771,7 @@ virtio_bounce_filt_read(struct knote *kn, long hint)
 	return (1);
 }
 
-struct filterops virtio_bounce_rfiltops = {
+struct filterops virtio_bounce_filtops = {
 	.f_isfd = 1,
 	.f_attach = virtio_bounce_filt_attach,
 	.f_detach = virtio_bounce_filt_detach,
@@ -794,7 +794,7 @@ virtio_bounce_kqfilter(struct cdev *dev, struct knote *kn)
 		return (EINVAL);
 	}
 
-	kn->kn_fop = &virtio_bounce_rfiltops;
+	kn->kn_fop = &virtio_bounce_filtops;
 	kn->kn_hook = sc;
 	knlist_add(&sc->vtb_note, kn, 0);
 
