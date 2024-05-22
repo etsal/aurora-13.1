@@ -58,11 +58,12 @@ struct vtmmio_softc {
 	vtmmio_alloc_cb_t		*vtmmio_ringalloc_cb;
 };
 
-int vtmmio_probe(device_t dev);
-void vtmmio_reset(struct vtmmio_softc *sc);
-uint8_t vtmmio_get_status(device_t dev);
-void vtmmio_set_status(device_t dev, uint8_t status);
-void vtmmio_probe_and_attach_child(struct vtmmio_softc *sc);
+int vtmmio_probe(device_t);
+int vtmmio_attach(device_t);
+void vtmmio_reset(struct vtmmio_softc *);
+uint8_t vtmmio_get_status(device_t);
+void vtmmio_set_status(device_t, uint8_t);
+void vtmmio_probe_and_attach_child(struct vtmmio_softc *);
 
 #define vtmmio_read_config_1(sc, o) \
 	bus_read_1((sc)->res[0], (o))

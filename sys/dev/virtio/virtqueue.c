@@ -456,8 +456,7 @@ virtqueue_nused(struct virtqueue *vq)
 	used_idx = vq_htog16(vq, vq->vq_ring.used->idx);
 
 	nused = (uint16_t)(used_idx - vq->vq_used_cons_idx);
-	KASSERT(nused <= vq->vq_nentries, ("used more than available %d, %d, %d, %d", nused, vq->vq_nentries,
-				used_idx, vq->vq_ring.used->idx));
+	VQASSERT(vq, nused <= vq->vq_nentries, "used more than available");
 
 	return (nused);
 }
