@@ -87,11 +87,6 @@ iove_import(struct virtio_softc *vs, struct iov_emul *iove)
 		.touser = true,
 	};
 
-	printf("Driver %p\n", args.transfers[args.cnt-1].vtbt_driver);
-	printf("Device %p\n", args.transfers[args.cnt-1].vtbt_device);
-	printf("Length %ld\n", args.transfers[args.cnt-1].vtbt_len);
-	printf("Got %lu transfers\n", args.cnt);
-
 	return (ioctl(fd, VIRTIO_BOUNCE_TRANSFER, &args));
 }
 

@@ -578,39 +578,32 @@ vi_find_cr(int offset) {
 static void
 vi_handle_state_change(struct mmio_devinst *mdi, uint32_t status)
 {
-	printf("%s:%d status %x\n", __func__, __LINE__, status);
 	switch (mdi->mi_state) {
 	case MIDEV_INVALID:
-		printf("%s:%d\n", __func__, __LINE__);
 		if (status & VIRTIO_CONFIG_STATUS_ACK)
 			mdi->mi_state = MIDEV_ACKNOWLEDGED;
 		break;
 
 	case MIDEV_ACKNOWLEDGED:
-		printf("%s:%d\n", __func__, __LINE__);
 		if (status & VIRTIO_CONFIG_STATUS_DRIVER)
 			mdi->mi_state = MIDEV_DRIVER_FOUND;
 		break;
 
 	case MIDEV_DRIVER_FOUND:
-		printf("%s:%d\n", __func__, __LINE__);
 		if (status & VIRTIO_CONFIG_S_FEATURES_OK)
 			mdi->mi_state = MIDEV_FEATURES_OK;
 		break;
 
 	case MIDEV_FEATURES_OK:
-		printf("%s:%d\n", __func__, __LINE__);
 		if (status & VIRTIO_CONFIG_STATUS_DRIVER_OK)
 			mdi->mi_state = MIDEV_LIVE;
 
 		break;
 
 	case MIDEV_LIVE:
-		printf("%s:%d\n", __func__, __LINE__);
 		break;
 
 	case MIDEV_FAILED:
-		printf("%s:%d\n", __func__, __LINE__);
 		mdi->mi_state = MIDEV_FAILED;
 		break;
 
@@ -627,13 +620,11 @@ vi_handle_status(struct virtio_softc *vs, uint32_t status)
 	struct mmio_devinst *mdi = vs->vs_mi;
 
 	if (status & VIRTIO_CONFIG_STATUS_FAILED) {
-		printf("%s:%d\n", __func__, __LINE__);
 		mdi->mi_state = MIDEV_FAILED;
 		return;
 	}
 
 	if (status & VIRTIO_CONFIG_STATUS_RESET) {
-		printf("%s:%d\n", __func__, __LINE__);
 		mdi->mi_state = MIDEV_INVALID;
 		vi_reset_dev(vs);
 		return;
@@ -790,23 +781,15 @@ vi_handle_queue_notify(struct virtio_softc *vs, uint32_t ind)
 			vc->vc_name, ind);
 	}
 
-	printf("Notified\n");
 	vq = &vs->vs_queues[ind];
 	if (vq->vq_notify) {
-		printf("%d Notified\n", __LINE__);
 		(*vq->vq_notify)(DEV_SOFTC(vs), vq);
-		printf("%d Notified\n", __LINE__);
 	} else if (vc->vc_qnotify) {
-		printf("%d Notified\n", __LINE__);
 		(*vc->vc_qnotify)(DEV_SOFTC(vs), vq); 
-		printf("%d Notified\n", __LINE__);
 	} else {
-		printf("%d Notified\n", __LINE__);
 		EPRINTLN("%s: qnotify value %d: missing vq/vc notify",
 			vc->vc_name, ind);
-		printf("%d Notified\n", __LINE__);
 	}
-	printf("Notify done\n");
 
 }
 
@@ -830,8 +813,6 @@ vi_mmio_write(struct virtio_softc *vs, uint64_t offset)
 
 	vc = vs->vs_vc;
 	name = vc->vc_name;
-
-	printf("Got offset %ld\n", offset);
 
 	/* If writing in the config space, */
 	if (offset >= VIRTIO_MMIO_CONFIG) {

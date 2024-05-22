@@ -98,7 +98,6 @@ main(int argc, char *argv[])
 		exit(4);
 	}
 	
-	printf("%s:%d\n", __func__, __LINE__);
 	/* Head off to the main event dispatch loop. */
 	mevent_dispatch();
 
