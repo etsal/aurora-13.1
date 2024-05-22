@@ -3,6 +3,7 @@ include GENERIC-KASAN
 
 ident   DEBUG
 
+device		virtio_mmio		# VirtIO Memory Mapped IO device
 options 	INVARIANTS
 options 	INVARIANT_SUPPORT
 options 	DIAGNOSTIC
