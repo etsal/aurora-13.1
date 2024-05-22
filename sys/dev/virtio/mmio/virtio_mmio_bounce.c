@@ -76,13 +76,13 @@
 
 static device_t vtbounce_parent;
 static driver_t *vtbounce_driver;
+int global_tracking;
 
 /*
  * Information on a bounce character device instance.
  */
 struct vtbounce_softc {
 	struct mtx		vtb_mtx;
-	struct selinfo		vtb_sel;
 	struct knlist		vtb_note;
 	uint32_t		vtb_magic;
 
@@ -97,7 +97,6 @@ struct vtbounce_softc {
 	vm_ooffset_t		vtb_offset;
 
 	device_t		vtb_dev;
-#define vtb_note	vtb_sel.si_note
 };
 
 /*
@@ -286,7 +285,6 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	mtx_lock(&vtbsc->vtb_mtx);
 	vtbsc->vtb_offset = offset;
 	KNOTE_LOCKED(&vtbsc->vtb_note, 0);
-	selwakeup(&vtbsc->vtb_sel);
 
 	msleep(vtbsc, &vtbsc->vtb_mtx, PRIBIO, "vtmmionote", 0);
 
