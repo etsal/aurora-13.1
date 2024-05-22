@@ -62,7 +62,6 @@ struct vtmmio_virtqueue {
 	int			 vtv_no_intr;
 };
 
-static int	vtmmio_attach(device_t);
 static int	vtmmio_detach(device_t);
 static int	vtmmio_suspend(device_t);
 static int	vtmmio_resume(device_t);
