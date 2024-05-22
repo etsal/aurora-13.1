@@ -78,6 +78,10 @@ static device_t vtbounce_parent;
 static driver_t *vtbounce_driver;
 int global_tracking;
 
+#define VTBOUNCE_UPDATE_DESC	(0x1)
+#define VTBOUNCE_UPDATE_USED	(0x2)
+#define VTBOUNCE_UPDATE_AVAIL	(0x4)
+
 /*
  * Information on a bounce character device instance.
  */
@@ -93,6 +97,7 @@ struct vtbounce_softc {
 
 	virtqueue_intr_t	*vtb_intr;
 	void			*vtb_intr_arg;
+	uint32_t		vtb_flags;
 
 	vm_ooffset_t		vtb_offset;
 
@@ -219,12 +224,13 @@ static void
 vtmmio_bounce_qdesc_offset(struct vtmmio_softc *sc, uint64_t baseaddr,
 		int hireg, int loreg)
 {
+	struct resource *res = sc->res[0];
 	uint32_t hi, lo;
 	uint64_t qaddr;
 
 	/* Read in the components of the physical address. */
-	hi = bus_read_4(sc->res[0], hireg);
-	lo = bus_read_4(sc->res[0], loreg);
+	hi = bus_read_4(res, hireg);
+	lo = bus_read_4(res, loreg);
 
 	/* Recompute into an offset into the vq control region. */
 	qaddr = (((uint64_t)hi) << 32 | (uint64_t)lo);
@@ -234,12 +240,9 @@ vtmmio_bounce_qdesc_offset(struct vtmmio_softc *sc, uint64_t baseaddr,
 	hi = (qaddr >> 32);
 	lo = (qaddr & ((1ULL << 32) - 1));
 	
-	bus_write_4(sc->res[0], hireg, hi);
-	bus_write_4(sc->res[0], loreg, lo);
+	bus_write_4(res, hireg, hi);
+	bus_write_4(res, loreg, lo);
 }
-
-/* XXX Embed into the softc state. */
-bool qdesc_recompute, qavail_recompute, qused_recompute;
 
 /* Notify userspace of a write, and wait for a response. */
 static int
@@ -257,16 +260,19 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	 * registers and instead pass to the user the offset from the beginning 
 	 * of the control region. Do not actually notify userspace of the writes,
 	 * it will be notified once we set VIRTIO_MMIO_QUEUE_READY.
+	 *
+	 * Both high and low registers are set together, so just track writes to
+	 * the high address bits.
 	 */
 	switch (offset) {
 	case VIRTIO_MMIO_QUEUE_DESC_HIGH:
-		qdesc_recompute = 1;
+		vtbsc->vtb_flags |= VTBOUNCE_UPDATE_DESC;
 		return (1);
 	case VIRTIO_MMIO_QUEUE_USED_HIGH:
-		qused_recompute = 1;
+		vtbsc->vtb_flags |= VTBOUNCE_UPDATE_USED;
 		return (1);
 	case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
-		qavail_recompute = 1;
+		vtbsc->vtb_flags |= VTBOUNCE_UPDATE_AVAIL;
 		return (1);
 	}
 
@@ -282,22 +288,22 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 		break;
 	case VIRTIO_MMIO_QUEUE_READY:
 		/* if changed, transform the offsets. */
-		if (qdesc_recompute) {
+		if (vtbsc->vtb_flags & VTBOUNCE_UPDATE_DESC) {
 			vtmmio_bounce_qdesc_offset(&sc->vtmb_mmio, vtbsc->vtb_baseaddr,
 				VIRTIO_MMIO_QUEUE_DESC_HIGH, VIRTIO_MMIO_QUEUE_DESC_LOW);
-			qdesc_recompute = 0;
+			vtbsc->vtb_flags &= ~VTBOUNCE_UPDATE_DESC;
 		}
 
-		if (qused_recompute) {
+		if (vtbsc->vtb_flags & VTBOUNCE_UPDATE_USED) {
 			vtmmio_bounce_qdesc_offset(&sc->vtmb_mmio, vtbsc->vtb_baseaddr,
 				VIRTIO_MMIO_QUEUE_USED_HIGH, VIRTIO_MMIO_QUEUE_USED_LOW);
-			qused_recompute = 0;
+			vtbsc->vtb_flags &= ~VTBOUNCE_UPDATE_USED;
 		}
 
-		if (qavail_recompute) {
+		if (vtbsc->vtb_flags & VTBOUNCE_UPDATE_AVAIL) {
 			vtmmio_bounce_qdesc_offset(&sc->vtmb_mmio, vtbsc->vtb_baseaddr,
 				VIRTIO_MMIO_QUEUE_AVAIL_HIGH, VIRTIO_MMIO_QUEUE_AVAIL_LOW);
-			qavail_recompute = 0;
+			vtbsc->vtb_flags &= ~VTBOUNCE_UPDATE_AVAIL;
 		}
 		break;
 	default:
