@@ -76,7 +76,6 @@
 
 static device_t vtbounce_parent;
 static driver_t *vtbounce_driver;
-int global_tracking;
 
 #define VTBOUNCE_UPDATE_DESC	(0x1)
 #define VTBOUNCE_UPDATE_USED	(0x2)
@@ -314,7 +313,20 @@ vtmmio_bounce_note(device_t dev, size_t offset, int val)
 	vtbsc->vtb_offset = offset;
 	KNOTE_LOCKED(&vtbsc->vtb_note, 0);
 
-	msleep(vtbsc, &vtbsc->vtb_mtx, PRIBIO, "vtmmionote", 0);
+	/* 
+	 * We cannot sleep here because this code is called holding non-sleepable locks.
+	 * This is because this busy wait's corresponding operations for other transports is 
+	 * a VM exit, which is instantaneous from the point of view of the guest kernel.
+	 * To prevent a "sleeping thread" panic, we busy wait here. There is always the
+	 * danger of our VMM process leaving us hanging, but that is always a danger even
+	 * with non-emulated virtio transports - it just isn't visible to the guest, since
+	 * the VMM is normally on the host.
+	 */
+	while (vtbsc->vtb_offset != 0) {
+		mtx_unlock(&vtbsc->vtb_mtx);
+		cpu_spinwait();
+		mtx_lock(&vtbsc->vtb_mtx);
+	}
 
 	mtx_unlock(&vtbsc->vtb_mtx);
 
@@ -407,11 +419,12 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 		return (ENOMEM);
 	}
 
+	/* XXX Better calculation for this. */
 	end_m = m + (bytes / PAGE_SIZE);
-	printf("PHYSICAL ADDRESS %lx\n", m->phys_addr);
 	tmp = baseaddr;
 	for (; m < end_m; m++) {
 		vm_page_valid(m);
+		pmap_zero_page(m);
 		pmap_enter(kernel_pmap, tmp, m, VM_PROT_RW,
 		    VM_PROT_RW | PMAP_ENTER_WIRED, 0);
 		tmp += PAGE_SIZE;
@@ -420,6 +433,8 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 
 
 	sc->vtb_baseaddr = baseaddr;
+	/* XXX Hack, calculate the device space properly. */
+	sc->vtb_allocated = PAGE_SIZE;
 	sc->vtb_bytes = bytes;
 
 	return (0);
@@ -537,7 +552,7 @@ virtio_bounce_ringalloc(device_t dev, size_t size)
 	}
 	
 	mem = (void *)(sc->vtb_baseaddr + sc->vtb_allocated);
-	/* XXX Zero at allocation time. */
+	/* XXX Do we also need to zero it here? */
 	bzero(mem, size);
 	sc->vtb_allocated += size;
 
