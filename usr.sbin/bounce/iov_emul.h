@@ -14,7 +14,7 @@ struct iov_emul {
 struct iov_emul *iove_alloc(void);
 void iove_free(struct iov_emul *iove);
 int iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov);
-int iove_import(struct virtio_softc *vs, struct iov_emul *iove);
-int iove_export(struct virtio_softc *vs, struct iov_emul *iove);
+int iove_import(int fd, struct iov_emul *iove);
+int iove_export(int fd, struct iov_emul *iove);
 
 #endif /* _IOV_EMUL_E */

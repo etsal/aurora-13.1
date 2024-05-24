@@ -55,6 +55,7 @@
 #include "mmio_emul.h"
 #include "virtio.h"
 #include "block_if.h"
+#include "iov_emul.h"
 
 #define	VTBLK_BSIZE	512
 #define	VTBLK_RINGSZ	128
@@ -169,6 +170,7 @@ struct mmio_vtblk_ioreq {
 	struct mmio_vtblk_softc		*io_sc;
 	uint8_t				*io_status;
 	uint16_t			io_idx;
+	struct iov_emul			*io_iove;
 };
 
 struct virtio_blk_discard_write_zeroes {
@@ -224,6 +226,7 @@ static void
 mmio_vtblk_done_locked(struct mmio_vtblk_ioreq *io, int err)
 {
 	struct mmio_vtblk_softc *sc = io->io_sc;
+	int fd = sc->vbsc_vs.vs_mi->mi_fd;
 
 	/* convert errno into a virtio block error return */
 	if (err == EOPNOTSUPP || err == ENOSYS)
@@ -232,6 +235,11 @@ mmio_vtblk_done_locked(struct mmio_vtblk_ioreq *io, int err)
 		*io->io_status = VTBLK_S_IOERR;
 	else
 		*io->io_status = VTBLK_S_OK;
+
+
+	iove_export(fd, io->io_iove);
+	iove_free(io->io_iove);
+	io->io_iove = NULL;
 
 	/*
 	 * Return the descriptor back to the host.
@@ -285,6 +293,7 @@ mmio_vtblk_proc(struct mmio_vtblk_softc *sc, struct vqueue_info *vq)
 	io->io_req.br_iovcnt = n - 2;
 	io->io_req.br_offset = vbh->vbh_sector * VTBLK_BSIZE;
 	io->io_status = (uint8_t *)iov[--n].iov_base;
+	io->io_iove = req.iove;
 	assert(req.writable != 0);
 	assert(iov[n].iov_len == 1);
 

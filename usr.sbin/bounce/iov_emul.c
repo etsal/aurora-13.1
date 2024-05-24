@@ -78,9 +78,8 @@ iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov)
  * Import a read IO vector from the kernel.
  */
 int
-iove_import(struct virtio_softc *vs, struct iov_emul *iove)
+iove_import(int fd, struct iov_emul *iove)
 {
-	int fd = vs->vs_mi->mi_fd;
 	struct virtio_bounce_io_args args = {
 		.transfers = iove->iove_tf,
 		.cnt = iove->iove_ind,
@@ -94,9 +93,8 @@ iove_import(struct virtio_softc *vs, struct iov_emul *iove)
  * Export a write IO vector to the kernel.
  */
 int
-iove_export(struct virtio_softc *vs, struct iov_emul *iove)
+iove_export(int fd, struct iov_emul *iove)
 {
-	int fd = vs->vs_mi->mi_fd;
 	struct virtio_bounce_io_args args = {
 		.transfers = iove->iove_tf,
 		.cnt = iove->iove_ind,

@@ -239,11 +239,8 @@ struct vqueue_info {
 	struct vring_desc *vq_desc;	/* descriptor array */
 	struct vring_avail *vq_avail;	/* the "avail" ring */
 	struct vring_used *vq_used;	/* the "used" ring */
-
-	struct iov_emul	*vq_readio;	/* emulated MMIO read IO vector */
-	struct iov_emul	*vq_writeio;	/* emulated MMIO write IO vector */
-
 };
+
 /* as noted above, these are sort of backwards, name-wise */
 #define VQ_AVAIL_EVENT_IDX(vq) \
 	(*(uint16_t *)&(vq)->vq_used->ring[(vq)->vq_qsize])
@@ -320,6 +317,7 @@ struct vi_req {
 	int readable;		/* num of readable iovecs */
 	int writable;		/* num of writable iovecs */
 	unsigned int idx;	/* ring index */
+	struct iov_emul *iove;	/* Export io vector */
 };
 
 void	vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,

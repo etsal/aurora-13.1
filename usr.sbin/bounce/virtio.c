@@ -31,6 +31,7 @@
 #include <sys/ioctl.h>
 #include <sys/uio.h>
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -156,7 +157,8 @@ vi_vq_init(struct mmio_devinst *mdi, struct vqueue_info *vq)
  */
 static inline void
 _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
-    int n_iov, struct vi_req *reqp, struct vqueue_info *vq)
+    int n_iov, struct vi_req *reqp, struct iov_emul *wiove,
+    struct iov_emul *riove)
 {
 	if (i >= n_iov)
 		return;
@@ -164,12 +166,12 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 	/* XXX Add error handling. */
 	/* Preallocate a descriptor data region for the descriptor */
 	if ((vd->flags & VRING_DESC_F_WRITE) == 0) {
-		if (iove_add(vq->vq_readio, vd->addr, vd->len, &iov[i]) != 0)
+		if (iove_add(riove, vd->addr, vd->len, &iov[i]) != 0)
 			return;
 
 		reqp->readable++; 
 	} else {
-		if (iove_add(vq->vq_writeio, vd->addr, vd->len, &iov[i]) != 0)
+		if (iove_add(wiove, vd->addr, vd->len, &iov[i]) != 0)
 			return;
 
 		reqp->writable++;
@@ -230,20 +232,21 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 	struct virtio_softc *vs;
 	const char *name;
 	int error;
+	struct iov_emul	*riove, *wiove;
+	int fd;
 
 	vs = vq->vq_vs;
+	fd = vs->vs_mi->mi_fd;
 	name = vs->vs_vc->vc_name;
 	memset(&req, 0, sizeof(req));
 
-	assert(vq->vq_readio == NULL);
-	assert(vq->vq_writeio == NULL);
-
 	vindir = NULL;
-	vq->vq_readio = iove_alloc();
-	vq->vq_writeio = iove_alloc();
-	if (vq->vq_readio == NULL || vq->vq_writeio == NULL) {
-		iove_free(vq->vq_readio);
-		iove_free(vq->vq_writeio);
+	riove = iove_alloc();
+	wiove = iove_alloc();
+	if (riove == NULL || wiove == NULL) {
+		iove_free(riove);
+		iove_free(wiove);
+		return (ENOMEM);
 	}
 
 	/*
@@ -280,6 +283,7 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 	 * index, but we just abort if the count gets excessive.
 	 */
 	req.idx = next = vq->vq_avail->ring[idx & (vq->vq_qsize - 1)];
+	req.iove = wiove;
 	vq->vq_last_avail++;
 	for (i = 0; i < VQ_MAX_DESCRIPTORS; next = vdir->next) {
 		if (next >= vq->vq_qsize) {
@@ -291,7 +295,7 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 		}
 		vdir = &vq->vq_desc[next];
 		if ((vdir->flags & VRING_DESC_F_INDIRECT) == 0) {
-			_vq_record(i, vdir, iov, niov, &req, vq);
+			_vq_record(i, vdir, iov, niov, &req, wiove, riove);
 			i++;
 		} else if ((vs->vs_vc->vc_hv_caps &
 		    VIRTIO_RING_F_INDIRECT_DESC) == 0) {
@@ -330,7 +334,7 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 					    name);
 					goto error;
 				}
-				_vq_record(i, vp, iov, niov, &req, vq);
+				_vq_record(i, vp, iov, niov, &req, wiove, riove);
 				if (++i > VQ_MAX_DESCRIPTORS) {
 					EPRINTLN(
 					"%s: descriptor loop? count > %d - driver confused?",
@@ -354,9 +358,9 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 	}
 
 error:
-	iove_free(vq->vq_readio);
-	iove_free(vq->vq_writeio);
-	vq->vq_readio = vq->vq_writeio = NULL;
+	iove_free(riove);
+	iove_free(wiove);
+
 	/* XXX Reactivate once we handle indirect descriptors. */
 	//free(vindir);
 
@@ -364,7 +368,8 @@ error:
 
 done:
 	/* Read in readable descriptors from the kernel. */
-	error = iove_import(vs, vq->vq_readio);
+	error = iove_import(fd, riove);
+	iove_free(riove);
 
 	/* XXX Reactivate once we handle indirect descriptors. */
 	//free(vindir);
@@ -373,9 +378,6 @@ done:
 		EPRINTLN("Reading in data failed with %d", error);
 		return (-1);
 	}
-
-	iove_free(vq->vq_readio);
-	vq->vq_readio = NULL;
 
 	*reqp = req;
 	return (i);
@@ -437,17 +439,6 @@ vq_relchain_publish(struct vqueue_info *vq)
 void
 vq_relchain(struct vqueue_info *vq, uint16_t idx, uint32_t iolen)
 {
-	struct virtio_softc *vs = vq->vq_vs;
-	int error;
-
-	/* Forward the writes to the driver's descriptors. */
-	error = iove_export(vs, vq->vq_writeio);
-	if (error != 0)
-		EPRINTLN("Writing out data failed with %d\n", error);
-
-	iove_free(vq->vq_writeio);
-	vq->vq_writeio = NULL;
-
 	vq_relchain_prepare(vq, idx, iolen);
 	vq_relchain_publish(vq);
 }
