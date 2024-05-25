@@ -82,10 +82,11 @@
 static device_t vtdbg_parent;
 static driver_t *vtdbg_driver;
 
-#define VTDBG_UPDATE_DESC	(0x1)
-#define VTDBG_UPDATE_USED	(0x2)
-#define VTDBG_UPDATE_AVAIL	(0x4)
-#define VTDBG_EXITING		(0x8)
+#define VTDBG_UPDATE_DESC	(0x01)
+#define VTDBG_UPDATE_USED	(0x02)
+#define VTDBG_UPDATE_AVAIL	(0x04)
+#define VTDBG_INTR_PENDING	(0x08)
+#define VTDBG_INTR_EXITING	(0x10)
 
 /*
  * Information on a debug device instance. Accessed 
@@ -467,7 +468,13 @@ vtdbg_intr(void *arg)
 	struct vtdbg_softc *sc = (struct vtdbg_softc *)arg;
 
 	mtx_lock(&sc->vtd_mtx);
-	while ((sc->vtd_flags & VTDBG_EXITING) == 0) {
+	while ((sc->vtd_flags & VTDBG_INTR_EXITING) == 0) {
+		if ((sc->vtd_flags & VTDBG_INTR_PENDING) == 0) {
+			cv_wait(&sc->vtd_cv, &sc->vtd_mtx);
+			continue;
+		}
+
+		sc->vtd_flags &= ~VTDBG_INTR_PENDING;
 		mtx_unlock(&sc->vtd_mtx);
 
 		if (sc->vtd_intr)
@@ -501,7 +508,7 @@ vtdbg_dtor(void *arg)
 
 	if (sc->vtd_pintr != NULL) {
 		mtx_lock(&sc->vtd_mtx);
-		sc->vtd_flags |= VTDBG_EXITING;
+		sc->vtd_flags |= VTDBG_INTR_EXITING;
 		cv_signal(&sc->vtd_cv);
 		mtx_unlock(&sc->vtd_mtx);
 
@@ -746,6 +753,7 @@ static void
 vtdbg_kick(struct vtdbg_softc *sc)
 {
 	mtx_lock(&sc->vtd_mtx);
+	sc->vtd_flags |= VTDBG_INTR_PENDING;
 	cv_signal(&sc->vtd_cv);
 	mtx_unlock(&sc->vtd_mtx);
 }
