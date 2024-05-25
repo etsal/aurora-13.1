@@ -1,4 +1,4 @@
-PROG=	virtio_emul
+PROG=	virtiodbg
 
 .PATH:	${SRCTOP}/sys/libkern	
 
@@ -10,7 +10,7 @@ SRCS=	block_if.c \
 	mmio_virtio_block.c \
 	mmio_emul.c \
 	virtio.c \
-	virtio_emul.c
+	virtiodbg.c
 
 MAN=
 

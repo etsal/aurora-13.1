@@ -99,7 +99,7 @@ SUBDIR=	adduser \
 	valectl \
 	vigr \
 	vipw \
-	virtio_emul \
+	virtiodbg \
 	wake \
 	watch \
 	watchdogd \
