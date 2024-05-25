@@ -83,43 +83,19 @@ vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 }
 
 /*
- * Deliver an interrupt to the guest on the given virtual queue.
- *
- * XXX Instead of handling the interrupt from the userspace thread, have
- * a dedicated kernel thread for interrupting as noted in the transport.
+ * Deliver an interrupt to the guest device.
  */
-
-struct vq_interrupt_args {
-	pthread_t thr;
-	int fd;
-};
-
-static void *
-vq_do_interrupt(void *arg)
+static void
+vq_interrupt(struct virtio_softc *vs)
 {
-	struct vq_interrupt_args *args = (struct vq_interrupt_args *)arg;
-	int fd = args->fd;
+	int fd = vs->vs_mi->mi_fd;
 	int error;
 
+	mmio_set_cfgdata32(vs->vs_mi, VIRTIO_MMIO_INTERRUPT_STATUS, VIRTIO_MMIO_INT_VRING);
 	error = ioctl(fd, VIRTIO_DBG_KICK);
 	if (error != 0)
 		EPRINTLN("device kick failed with %d\n", error);
 
-	free(arg);
-
-	pthread_exit(NULL);
-
-}
-
-static void
-vq_interrupt(struct virtio_softc *vs)
-{
-	struct vq_interrupt_args *arg = malloc(sizeof(*arg));
-	
-	arg->fd = vs->vs_mi->mi_fd;
-
-	mmio_set_cfgdata32(vs->vs_mi, VIRTIO_MMIO_INTERRUPT_STATUS, VIRTIO_MMIO_INT_VRING);
-	pthread_create(&arg->thr, NULL, vq_do_interrupt, (void *)arg);
 }
 
 /*

@@ -31,6 +31,7 @@
 #include <sys/event.h>
 #include <sys/kernel.h>
 #include <sys/kobj.h>
+#include <sys/kthread.h>
 #include <sys/limits.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
@@ -84,6 +85,7 @@ static driver_t *vtdbg_driver;
 #define VTDBG_UPDATE_DESC	(0x1)
 #define VTDBG_UPDATE_USED	(0x2)
 #define VTDBG_UPDATE_AVAIL	(0x4)
+#define VTDBG_EXITING		(0x8)
 
 /*
  * Information on a debug device instance. Accessed 
@@ -91,6 +93,7 @@ static driver_t *vtdbg_driver;
  */
 struct vtdbg_softc {
 	struct mtx		vtd_mtx;
+	struct cv		vtd_cv;
 	struct knlist		vtd_note;
 	uint32_t		vtd_magic;
 
@@ -101,9 +104,11 @@ struct vtdbg_softc {
 
 	virtqueue_intr_t	*vtd_intr;
 	void			*vtd_intr_arg;
-	uint32_t		vtd_flags;
+	struct proc		*vtd_pintr;
 
 	vm_ooffset_t		vtd_offset;
+
+	uint32_t		vtd_flags;
 
 	device_t		vtd_dev;
 };
@@ -456,6 +461,30 @@ vtdbg_map_kernel(struct vtdbg_softc *sc)
 	return (0);
 }
 
+static void
+vtdbg_intr(void *arg)
+{
+	struct vtdbg_softc *sc = (struct vtdbg_softc *)arg;
+
+	mtx_lock(&sc->vtd_mtx);
+	while ((sc->vtd_flags & VTDBG_EXITING) == 0) {
+		mtx_unlock(&sc->vtd_mtx);
+
+		if (sc->vtd_intr)
+			sc->vtd_intr(sc->vtd_intr_arg);
+
+		mtx_lock(&sc->vtd_mtx);
+		cv_wait(&sc->vtd_cv, &sc->vtd_mtx);
+	}
+	
+	sc->vtd_pintr = NULL;
+	cv_signal(&sc->vtd_cv);
+
+	mtx_unlock(&sc->vtd_mtx);
+
+	kproc_exit(0);
+}
+
 /*
  * Destroy the virtio transport instance when closing the
  * corresponding control device fd.
@@ -469,6 +498,18 @@ vtdbg_dtor(void *arg)
 	device_t dev;
 
 	MPASS(sc->vtd_magic == VTDBG_MAGIC);
+
+	if (sc->vtd_pintr != NULL) {
+		mtx_lock(&sc->vtd_mtx);
+		sc->vtd_flags |= VTDBG_EXITING;
+		cv_signal(&sc->vtd_cv);
+		mtx_unlock(&sc->vtd_mtx);
+
+		mtx_lock(&sc->vtd_mtx);
+		while (sc->vtd_pintr != NULL)
+			cv_wait(&sc->vtd_cv, &sc->vtd_mtx);
+		mtx_unlock(&sc->vtd_mtx);
+	}
 
 	dev = sc->vtd_dev;
 	if (dev != NULL) {
@@ -496,6 +537,8 @@ vtdbg_dtor(void *arg)
 
 	knlist_delete(&sc->vtd_note, curthread, 0);
 	knlist_destroy(&sc->vtd_note);
+
+	cv_destroy(&sc->vtd_cv);
 	mtx_destroy(&sc->vtd_mtx);
 
 	free(sc, M_DEVBUF);
@@ -514,6 +557,8 @@ vtdbg_open(struct cdev *cdev, int oflags, int devtype, struct thread *td)
 
 	sc->vtd_magic = VTDBG_MAGIC;
 	mtx_init(&sc->vtd_mtx, "vtdbg", NULL, MTX_DEF);
+	cv_init(&sc->vtd_cv, "vtdbg");
+
 	knlist_init_mtx(&sc->vtd_note, &sc->vtd_mtx);
 				
 	/* Create the common userspace/kernel virtio device region. */
@@ -525,6 +570,13 @@ vtdbg_open(struct cdev *cdev, int oflags, int devtype, struct thread *td)
 	}
 
 	error = vtdbg_map_kernel(sc);
+	if (error != 0) {
+		vtdbg_dtor(sc);
+		return (error);
+	}
+
+	error = kproc_create(vtdbg_intr, (void *)sc, &sc->vtd_pintr,
+		0, 0, "vtdbg_intr");
 	if (error != 0) {
 		vtdbg_dtor(sc);
 		return (error);
@@ -672,8 +724,6 @@ vtdbg_init(void)
 	return (DEVICE_ATTACH(transport));
 
 err:
-	/* XXX Test this path. */
-
 	sc = device_get_softc(transport);
 
 	bus_release_resource(transport, SYS_RES_MEMORY, 0,
@@ -690,16 +740,14 @@ err:
 }
 
 /* 
- * Instead of triggering an interrupt to handle the virtqueue operation, userspace does it
- * itself using an ioctl().
- *
- * XXX Use a dedicated kernel thread instead, handling driver interrupts like
- * this is causing performance degradation.
+ * Kick the dedicated kernel interrupt process.
  */
 static void
 vtdbg_kick(struct vtdbg_softc *sc)
 {
-	sc->vtd_intr(sc->vtd_intr_arg);
+	mtx_lock(&sc->vtd_mtx);
+	cv_signal(&sc->vtd_cv);
+	mtx_unlock(&sc->vtd_mtx);
 }
 
 /*
