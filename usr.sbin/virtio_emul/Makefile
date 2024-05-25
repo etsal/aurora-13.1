@@ -1,17 +1,16 @@
-PROG=	bounce
+PROG=	virtio_emul
 
-.PATH:	${SRCTOP}/sys/libkern		\
-	${SRCTOP}/sys/cam/ctl
+.PATH:	${SRCTOP}/sys/libkern	
 
 SRCS=	block_if.c \
-	bounce.c \
 	config.c \
 	iov.c \
 	iov_emul.c \
 	mevent.c \
 	mmio_virtio_block.c \
 	mmio_emul.c \
-	virtio.c
+	virtio.c \
+	virtio_emul.c
 
 MAN=
 

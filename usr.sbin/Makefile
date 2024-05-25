@@ -5,7 +5,6 @@ SUBDIR=	adduser \
 	arp \
 	binmiscctl \
 	boottrace \
-	bounce \
 	bsdconfig \
 	camdd \
 	cdcontrol \
@@ -100,6 +99,7 @@ SUBDIR=	adduser \
 	valectl \
 	vigr \
 	vipw \
+	virtio_emul \
 	wake \
 	watch \
 	watchdogd \
