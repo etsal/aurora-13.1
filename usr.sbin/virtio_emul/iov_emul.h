@@ -4,7 +4,7 @@
 struct virtio_softc;
 
 struct iov_emul {
-	struct virtio_bounce_transfer *iove_tf;
+	struct vtdbg_transfer *iove_tf;
 	size_t 		iove_maxcnt;
 	size_t 		iove_ind;
 };

@@ -73,7 +73,7 @@ struct mmio_devinst {
 
 /* XXX Sensible default until proven otherwise. But we need to link it with the in-kernel definition. */
 #define MMIO_TOTAL_SIZE (1024 * 1024 * 10)
-#define MMIO_CTRDEV ("/dev/virtio_bounce")
+#define MMIO_CTRDEV ("/dev/vtdbg")
 
 int init_mmio(nvlist_t *nvl);
 void mmio_print_supported_devices(void);

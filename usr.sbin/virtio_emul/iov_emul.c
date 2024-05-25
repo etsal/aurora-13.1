@@ -36,7 +36,7 @@ iove_free(struct iov_emul *iove)
 	size_t i;
 
 	for (i = 0; i < iove->iove_ind; i++)
-		free(iove->iove_tf[i].vtbt_device);
+		free(iove->iove_tf[i].vtdt_device);
 
 	free(iove);
 }
@@ -45,7 +45,7 @@ iove_free(struct iov_emul *iove)
 int
 iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov)
 {
-	struct virtio_bounce_transfer *tf = iove->iove_tf;
+	struct vtdbg_transfer *tf = iove->iove_tf;
 	size_t ind = iove->iove_ind;
 	char *base;
 
@@ -62,9 +62,9 @@ iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov)
 	if (base == NULL)
 		return (ENOMEM);
 
-	iove->iove_tf[ind].vtbt_device = base;
-	iove->iove_tf[ind].vtbt_driver = (caddr_t) phys;
-	iove->iove_tf[ind].vtbt_len = len;
+	iove->iove_tf[ind].vtdt_device = base;
+	iove->iove_tf[ind].vtdt_driver = (caddr_t) phys;
+	iove->iove_tf[ind].vtdt_len = len;
 	iove->iove_ind += 1;
 
 	iov->iov_base = base;
@@ -80,7 +80,7 @@ iove_add(struct iov_emul *iove, uint64_t phys, size_t len, struct iovec *iov)
 int
 iove_import(int fd, struct iov_emul *iove)
 {
-	struct virtio_bounce_io_args args = {
+	struct vtdbg_io_args args = {
 		.transfers = iove->iove_tf,
 		.cnt = iove->iove_ind,
 		.touser = true,
@@ -95,7 +95,7 @@ iove_import(int fd, struct iov_emul *iove)
 int
 iove_export(int fd, struct iov_emul *iove)
 {
-	struct virtio_bounce_io_args args = {
+	struct vtdbg_io_args args = {
 		.transfers = iove->iove_tf,
 		.cnt = iove->iove_ind,
 		.touser = false,
