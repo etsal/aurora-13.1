@@ -371,13 +371,6 @@ virtio_dbg_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *ih_u
 }
 
 static device_method_t virtio_dbg_methods[] = {
-        /* Device interface. */
-	/* XXX Do we need the generics here. */
-	DEVMETHOD(bus_add_child,		bus_generic_add_child),
-	DEVMETHOD(bus_alloc_resource,		bus_generic_alloc_resource),
-	DEVMETHOD(bus_release_resource,		bus_generic_release_resource),
-	DEVMETHOD(bus_print_child,		bus_generic_print_child),
-
 	DEVMETHOD(device_attach,		virtio_dbg_attach),
 	DEVMETHOD(device_identify,		virtio_dbg_identify),
 	DEVMETHOD(device_probe,			virtio_dbg_probe),
