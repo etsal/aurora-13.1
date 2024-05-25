@@ -69,7 +69,7 @@ struct virtio_feature_desc {
 #define VIRTIO_DRIVER_MODULE(name, driver, evh, arg)			\
 	DRIVER_MODULE(name, virtio_mmio, driver, evh, arg);		\
 	DRIVER_MODULE(name, virtio_pci, driver, evh, arg);		\
-	DRIVER_MODULE(name, vtmmio_bounce, driver, evh, arg)
+	DRIVER_MODULE(name, virtio_dbg, driver, evh, arg)
 
 
 struct virtio_pnp_match {
@@ -85,7 +85,7 @@ struct virtio_pnp_match {
 	    &driver ## _match, 1);					\
 	MODULE_PNP_INFO("U32:device_type;D:#", virtio_pci, driver,	\
 	    &driver ## _match, 1)					\
-	MODULE_PNP_INFO("U32:device_type;D:#", vtmmio_bounce, driver,	\
+	MODULE_PNP_INFO("U32:device_type;D:#", virtio_dbg, driver,	\
 	    &driver ## _match, 1)
 #define VIRTIO_SIMPLE_PROBE(dev, driver)				\
 	(virtio_simple_probe(dev, &driver ## _match))
