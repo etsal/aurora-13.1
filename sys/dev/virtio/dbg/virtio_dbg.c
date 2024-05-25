@@ -191,6 +191,9 @@ virtio_dbg_probe(device_t dev)
 	return (0);
 }
 
+/*
+ * Creates the virtio device corresponding to the transport instance.
+ */
 static int 
 virtio_dbg_attach(device_t dev)
 {
@@ -406,15 +409,13 @@ vtdbg_map_kernel(struct vtdbg_softc *sc)
 	vm_page_t m, end_m;
 	int error;
 
-	/*
-	 * XXX Do not allow mapping twice.
-	 */
+	/* XXX Do not allow mapping twice. */
 
 	vm_object_reference(obj);
 
 	/* 
 	 * Populate the object with physically contiguous pages, because
-	 * the object is used to back the virtqueue descriptor regions.
+	 * the object is used to back the virtio device control region.
 	 */
 	VM_OBJECT_WLOCK(obj);
 	m = vm_page_alloc_contig(obj, 0, VM_ALLOC_NORMAL | VM_ALLOC_ZERO, obj->size,
@@ -434,10 +435,6 @@ vtdbg_map_kernel(struct vtdbg_softc *sc)
 		return (ENOMEM);
 	}
 
-	/* 
-	 * XXX Is this fine if we get back superpages? Is it even possible
-	 * to get back superpages?
-	 */
 	end_m = m + (bytes / PAGE_SIZE);
 	tmp = baseaddr;
 	for (; m < end_m; m++) {
@@ -451,17 +448,24 @@ vtdbg_map_kernel(struct vtdbg_softc *sc)
 
 
 	sc->vtd_baseaddr = baseaddr;
-	sc->vtd_allocated = VTDBG_RESERVE_DEVSPACE;
 	sc->vtd_bytes = bytes;
+
+	/* Reserve space for the device control region. */
+	sc->vtd_allocated = VTDBG_RESERVE_DEVSPACE;
 
 	return (0);
 }
 
+/*
+ * Destroy the virtio transport instance when closing the
+ * corresponding control device fd.
+ */
 static void
 vtdbg_dtor(void *arg)
 {
 	struct virtio_dbg_softc *devsc;
 	struct vtdbg_softc *sc = (struct vtdbg_softc *)arg;
+	vm_offset_t sva, eva;
 	device_t dev;
 
 	MPASS(sc->vtd_magic == VTDBG_MAGIC);
@@ -475,19 +479,17 @@ vtdbg_dtor(void *arg)
 		mtx_unlock(&Giant);
 
 		free(devsc->vtmdbg_mmio.res[0], M_DEVBUF);
-		/* XXX Properly release. */
-		/*
 		bus_release_resource(dev, SYS_RES_MEMORY, 0,
 				devsc->vtmdbg_mmio.res[0]);
-				*/
 		device_delete_child(vtdbg_parent, dev);
 	}
 
 
 	if (sc->vtd_baseaddr != 0) {
-		/* XXX Remove from the pmap */
-		vm_map_remove(kernel_map, sc->vtd_baseaddr,
-			sc->vtd_baseaddr + sc->vtd_bytes);
+		sva = sc->vtd_baseaddr;
+		eva = sva + sc->vtd_bytes;
+		vm_map_remove(kernel_map, sva, eva);
+		pmap_remove(kernel_pmap, sva, eva);
 	}
 
 	vm_object_deallocate(sc->vtd_object);
@@ -514,7 +516,7 @@ vtdbg_open(struct cdev *cdev, int oflags, int devtype, struct thread *td)
 	mtx_init(&sc->vtd_mtx, "vtdbg", NULL, MTX_DEF);
 	knlist_init_mtx(&sc->vtd_note, &sc->vtd_mtx);
 				
-	/* vm_page_alloc_contig_domain */
+	/* Create the common userspace/kernel virtio device region. */
 	sc->vtd_object = vm_pager_allocate(OBJT_PHYS, NULL, sz, VM_PROT_ALL,
 			0, thread0.td_ucred);
 	if (sc->vtd_object == NULL) {
@@ -570,8 +572,6 @@ vtdbg_ringalloc(device_t dev, size_t size)
 	}
 	
 	mem = (void *)(sc->vtd_baseaddr + sc->vtd_allocated);
-	/* XXX Do we also need to zero it here? */
-	bzero(mem, size);
 	sc->vtd_allocated += size;
 
 	mtx_unlock(&sc->vtd_mtx);
@@ -589,15 +589,7 @@ vtdbg_create_transport(device_t parent, struct vtdbg_softc *vtdsc)
 
 	int uid = 0;
 
-	/* 
-	 * Create an instance of the emulated mmio transport. The RAM pseudobus
-	 * does not have any bus method pointers, so directly call the generic
-	 * functions.
-	 * XXX Move this to the RAM pseudobus.
-	 * XXX The RAM pseudobus is not fleshed out enough for this.
-	 */
 	transport = BUS_ADD_CHILD(parent, 0, virtio_dbg_driver.name, uid);
-
 	device_set_driver(transport, vtdbg_driver);
 
 	sc = device_get_softc(transport);
@@ -605,9 +597,9 @@ vtdbg_create_transport(device_t parent, struct vtdbg_softc *vtdsc)
 
 	/* 
 	 * XXX Hack. Create the resource out of thin air to
-	 * keep the bus_write_* calls working. Ideally we would
+	 * keep the vtmmio_write_* calls working. Ideally we would
 	 * be reserving the resource out of the RAM pseudobus,
-	 * but it has no implementation for resource management
+	 * but it has no associated struct rman * instance,
 	 * and multiple arch-specific implementations. Changing
 	 * it would require significant effort.
 	 */
@@ -647,15 +639,15 @@ vtdbg_linkup_transport(struct vtdbg_softc *vtdsc, device_t dev)
 /* 
  * Create virtio device. This function does the initialization both
  * for the emulated transport, and for the virtio device. These are
- * normally initialized at boot time using vtmmio_probe/vtmmio_attach,
+ * normally (e.g., for MMIO)) created at boot time using vtmmio_probe/vtmmio_attach,
  * and vtmmio_probe_and_attach_child, respectively. We do this initialization
- * here becauseewe are dynamically creating the devices after booting, so 
- * we must manually invoke the Newbus methods.
+ * here because we are dynamically creating the devices after booting, so 
+ * we must manually invoke the device probe and attach methods.
  */
 static int
 vtdbg_init(void)
 {
-	struct virtio_dbg_softc *mmiosc;
+	struct virtio_dbg_softc *sc;
 	struct vtdbg_softc *vtdsc;
 	device_t transport;
 	int error;
@@ -667,7 +659,6 @@ vtdbg_init(void)
 
 	MPASS(vtdsc->vtd_magic == VTDBG_MAGIC);
 
-	/* Create the child and assign its resources. */
 	transport = vtdbg_create_transport(vtdbg_parent, vtdsc);
 
 	error = vtdbg_linkup_transport(vtdsc, transport);
@@ -681,25 +672,29 @@ vtdbg_init(void)
 	return (DEVICE_ATTACH(transport));
 
 err:
+	/* XXX Test this path. */
 
-	mmiosc = device_get_softc(transport);
+	sc = device_get_softc(transport);
 
-	/*
 	bus_release_resource(transport, SYS_RES_MEMORY, 0,
-			mmiosc->vtmdbg_mmio.res[0]);
-			*/
-	free(mmiosc->vtmdbg_mmio.res[0], M_DEVBUF);
+			sc->vtmdbg_mmio.res[0]);
+	free(sc->vtmdbg_mmio.res[0], M_DEVBUF);
+
 	mtx_lock(&Giant);
 	device_delete_child(vtdbg_parent, transport);
 	mtx_unlock(&Giant);
+
 	vtdsc->vtd_dev = NULL;
 
 	return (error);
 }
 
 /* 
- * Instead of triggering an interrupt to handle 
- * the virtqueue operation, we do it ourselves.
+ * Instead of triggering an interrupt to handle the virtqueue operation, userspace does it
+ * itself using an ioctl().
+ *
+ * XXX Use a dedicated kernel thread instead, handling driver interrupts like
+ * this is causing performance degradation.
  */
 static void
 vtdbg_kick(struct vtdbg_softc *sc)
@@ -711,6 +706,9 @@ vtdbg_kick(struct vtdbg_softc *sc)
  * The mmio virtio code uses note() to let the host know there has been a write.
  * The note() call suspends the thread until the userspace device has been properly
  * emulated, at which point a userspace thread will allow it to resume.
+ *
+ * There can only be one unacknowledged interrupt outstanding at a time, so a single
+ * vtd_offset in the softc is enough.
  */
 static void
 vtdbg_ack(struct vtdbg_softc *sc)
@@ -721,6 +719,10 @@ vtdbg_ack(struct vtdbg_softc *sc)
 	mtx_unlock(&sc->vtd_mtx);
 }
 
+/*
+ * Get virtio data in and out of the kernel, required by userspace to interact with
+ * the data pointed to by the virtqueue descriptors.
+ */
 static int
 vtdbg_io(struct vtdbg_softc *sc, struct vtdbg_io_args *args)
 {
