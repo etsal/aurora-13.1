@@ -683,7 +683,6 @@ ram_attach(device_t dev)
 				    rid);
 			rid++;
 		}
-		bus_generic_probe(dev);
 		return (0);
 	}
 
@@ -710,16 +709,11 @@ ram_attach(device_t dev)
 		if (res == NULL)
 			panic("ram_attach: resource %d failed to attach", rid);
 	}
-	bus_generic_probe(dev);
 	return (0);
 }
 
 static device_method_t ram_methods[] = {
 	/* Device interface */
-	DEVMETHOD(bus_add_child,	bus_generic_add_child),
-	DEVMETHOD(bus_set_resource,	bus_generic_rl_set_resource),
-	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
-
 	DEVMETHOD(device_identify,	ram_identify),
 	DEVMETHOD(device_probe,		ram_probe),
 	DEVMETHOD(device_attach,	ram_attach),

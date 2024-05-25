@@ -373,8 +373,12 @@ static device_method_t virtio_dbg_methods[] = {
 
 DEFINE_CLASS_1(virtio_dbg, virtio_dbg_driver, virtio_dbg_methods,
     sizeof(struct vtdbg_softc), vtmmio_driver);
-DRIVER_MODULE(virtio_dbg, ram, virtio_dbg_driver, 0, 0);
-MODULE_DEPEND(virtio_dbg, ram, 1, 1, 1);
+/*
+ * XXX As noted below, we should be hanging off of the ram pseudodevice
+ * so we can reserve part of the real physical memory for our device. This
+ * is a significant task so avoid it for now.
+ */
+DRIVER_MODULE(virtio_dbg, nexus, virtio_dbg_driver, 0, 0);
 MODULE_VERSION(virtio_dbg, 1);
 
 static struct cdev *vtdbg_dev;

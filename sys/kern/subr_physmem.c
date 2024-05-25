@@ -607,8 +607,6 @@ ram_attach(device_t dev)
 		rid++;
 	}
 
-	bus_generic_probe(dev);
-
 	return (0);
 }
 
