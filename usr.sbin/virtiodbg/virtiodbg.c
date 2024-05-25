@@ -13,7 +13,7 @@
 #include "mmio_emul.h"
 
 static void
-bounce_usage(int code)
+virtiodbg_usage(int code)
 {
 	const char *progname;
 
@@ -29,7 +29,7 @@ bounce_usage(int code)
 }
 
 static bool
-bounce_parse_config_option(nvlist_t *nvl, const char *option)
+virtiodbg_parse_config_option(nvlist_t *nvl, const char *option)
 {
 	const char *key;
 	char *value;
@@ -47,7 +47,7 @@ bounce_parse_config_option(nvlist_t *nvl, const char *option)
 
 
 static nvlist_t *
-bounce_optparse(int argc, char **argv)
+virtiodbg_optparse(int argc, char **argv)
 {
 	const char *optstr;
 	nvlist_t *nvl;
@@ -67,16 +67,16 @@ bounce_optparse(int argc, char **argv)
 			else
 				break;
 		case 'o':
-			if (!bounce_parse_config_option(nvl, optarg)) {
+			if (!virtiodbg_parse_config_option(nvl, optarg)) {
 				errx(EX_USAGE,
 				    "invalid configuration option '%s'",
 				    optarg);
 			}
 			break;
 		case 'h':
-			bounce_usage(0);
+			virtiodbg_usage(0);
 		default:
-			bounce_usage(1);
+			virtiodbg_usage(1);
 		}
 	}
 
@@ -89,7 +89,7 @@ main(int argc, char *argv[])
 	nvlist_t *nvl;
 
 	init_config();
-	nvl = bounce_optparse(argc, argv);
+	nvl = virtiodbg_optparse(argc, argv);
 
 	/* Exit if a device emulation finds an error in its initialization */
 	if (init_mmio(nvl) != 0) {
