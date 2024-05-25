@@ -47,7 +47,7 @@
 #include <pthread.h>
 #include <md5.h>
 
-#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+#include <dev/virtio/dbg/virtio_dbg.h>
 
 #include "config.h"
 #include "debug.h"
@@ -430,7 +430,7 @@ mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 	vi_mmio_write(&sc->vbsc_vs, offset);
 	
 	/* Let in-progress operations continue.  */
-	ioctl(mdi->mi_fd, VIRTIO_BOUNCE_ACK);
+	ioctl(mdi->mi_fd, VIRTIO_DBG_ACK);
 }
 
 static int

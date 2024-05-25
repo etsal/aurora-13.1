@@ -12,7 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+#include <dev/virtio/dbg/virtio_dbg.h>
 
 #include "config.h"
 #include "debug.h"
@@ -42,7 +42,7 @@ mmio_emul_driver_init(void *arg)
 	int error;
 	int fd = (int)(long)arg;
 
-	error = ioctl(fd, VIRTIO_BOUNCE_INIT);
+	error = ioctl(fd, VIRTIO_DBG_INIT);
 	if (error < 0) {
 		EPRINTLN("Control device initialization error: %s",
 		    strerror(errno));

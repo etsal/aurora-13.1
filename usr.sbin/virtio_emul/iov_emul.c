@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+#include <dev/virtio/dbg/virtio_dbg.h>
 
 #include "debug.h"
 #include "iov_emul.h"
@@ -86,7 +86,7 @@ iove_import(int fd, struct iov_emul *iove)
 		.touser = true,
 	};
 
-	return (ioctl(fd, VIRTIO_BOUNCE_TRANSFER, &args));
+	return (ioctl(fd, VIRTIO_DBG_TRANSFER, &args));
 }
 
 /*
@@ -101,6 +101,6 @@ iove_export(int fd, struct iov_emul *iove)
 		.touser = false,
 	};
 
-	return (ioctl(fd, VIRTIO_BOUNCE_TRANSFER, &args));
+	return (ioctl(fd, VIRTIO_DBG_TRANSFER, &args));
 }
 

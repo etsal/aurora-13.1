@@ -58,9 +58,9 @@
 
 #include <dev/virtio/virtio_config.h>
 #include <dev/virtio/virtqueue.h>
+#include <dev/virtio/dbg/virtio_dbg.h>
 #include <dev/virtio/mmio/virtio_mmio.h>
 
-#include "virtio_mmio_bounce_ioctl.h"
 #include "virtio_mmio_if.h"
 
 #define VTBOUNCE_MAGIC ((uint64_t)0x84848484ULL)
@@ -758,16 +758,16 @@ virtio_bounce_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag, stru
 
 	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);
 	switch (cmd) {
-	case VIRTIO_BOUNCE_INIT:
+	case VIRTIO_DBG_INIT:
 		ret = virtio_bounce_init();
 		break;
-	case VIRTIO_BOUNCE_KICK:
+	case VIRTIO_DBG_KICK:
 		virtio_bounce_kick(sc);
 		break;
-	case VIRTIO_BOUNCE_ACK:
+	case VIRTIO_DBG_ACK:
 		virtio_bounce_ack(sc);
 		break;
-	case VIRTIO_BOUNCE_TRANSFER:
+	case VIRTIO_DBG_TRANSFER:
 		ret = virtio_bounce_io(sc, (struct virtio_bounce_io_args *)data);
 		break;
 	}

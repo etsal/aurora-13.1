@@ -40,7 +40,7 @@
 #include <pthread.h>
 #include <pthread_np.h>
 
-#include <dev/virtio/mmio/virtio_mmio_bounce_ioctl.h>
+#include <dev/virtio/dbg/virtio_dbg.h>
 
 #include "debug.h"
 #include "iov_emul.h"
@@ -508,7 +508,7 @@ void *vq_make_interrupt(void *arg)
 	int fd = (int)(uint64_t)arg;
 	int error;
 
-	error = ioctl(fd, VIRTIO_BOUNCE_KICK);
+	error = ioctl(fd, VIRTIO_DBG_KICK);
 	if (error != 0)
 		EPRINTLN("device kick failed with %d\n", error);
 	pthread_exit(NULL);
