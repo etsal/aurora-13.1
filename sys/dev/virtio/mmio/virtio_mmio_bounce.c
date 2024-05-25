@@ -65,8 +65,12 @@
 
 #define VTBOUNCE_MAGIC ((uint64_t)0x84848484ULL)
 
-/* XXX Make this a sysctl. */
+/* 
+ * XXX Determine these sizes in a well-defined
+ * per-device fashion.
+ */
 #define VTBOUNCE_MAPSZ (1024 * 1024 * 10)
+#define VTBOUNCE_RESERVE_DEVSPACE (4096)
 
 /* XXX Remove after development is done. */
 #define VTBOUNCE_WARN(format, ...)                                            \
@@ -189,10 +193,6 @@ vtmmio_bounce_attach(device_t dev)
 	/* Tell the host we've noticed this device. */
 	vtmmio_set_status(dev, VIRTIO_CONFIG_STATUS_ACK);
 
-	/* 
-	 * XXX Use the giant lock only when using device_* API, otherwise
-	 * a bug on bhyve causes a lockup.
-	 */
 	mtx_lock(&Giant);
 	if ((child = device_add_child(dev, NULL, -1)) == NULL) {
 		device_printf(dev, "Cannot create child device.\n");
@@ -419,7 +419,10 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 		return (ENOMEM);
 	}
 
-	/* XXX Better calculation for this. */
+	/* 
+	 * XXX Is this fine if we get back superpages? Is it even possible
+	 * to get back superpages?
+	 */
 	end_m = m + (bytes / PAGE_SIZE);
 	tmp = baseaddr;
 	for (; m < end_m; m++) {
@@ -433,8 +436,7 @@ virtio_bounce_map_kernel(struct vtbounce_softc *sc)
 
 
 	sc->vtb_baseaddr = baseaddr;
-	/* XXX Hack, calculate the device space properly. */
-	sc->vtb_allocated = PAGE_SIZE;
+	sc->vtb_allocated = VTBOUNCE_RESERVE_DEVSPACE;
 	sc->vtb_bytes = bytes;
 
 	return (0);
@@ -458,6 +460,7 @@ virtio_bounce_dtor(void *arg)
 		mtx_unlock(&Giant);
 
 		free(devsc->vtmb_mmio.res[0], M_DEVBUF);
+		/* XXX Properly release. */
 		/*
 		bus_release_resource(dev, SYS_RES_MEMORY, 0,
 				devsc->vtmb_mmio.res[0]);
@@ -795,12 +798,6 @@ virtio_bounce_filt_read(struct knote *kn, long hint)
 {
 	struct vtbounce_softc *sc;
 
-
-	/* 
-	 * XXX What happens if we have multiple
-	 * threads triggering events? Looks like 
-	 * we need a queue to be consumed by userspace.
-	 */
 
 	sc = (struct vtbounce_softc *)kn->kn_hook;
 	MPASS(sc->vtb_magic == VTBOUNCE_MAGIC);

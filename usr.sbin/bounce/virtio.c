@@ -871,6 +871,9 @@ bad:
 	case VIRTIO_MMIO_INTERRUPT_ACK: 	    	
 		vi_handle_interrupt_ack(vs, value);
 		break;
+	default:
+		EPRINTLN("Unhandled offset %d\n", cr->cr_offset);
+		assert(0);
 	}
 
 	goto done;
