@@ -86,7 +86,8 @@ static driver_t *vtdbg_driver;
 #define VTDBG_UPDATE_AVAIL	(0x4)
 
 /*
- * Information on a bounce character device instance.
+ * Information on a debug device instance. Accessed 
+ * through the control device's softc.
  */
 struct vtdbg_softc {
 	struct mtx		vtd_mtx;
@@ -109,13 +110,21 @@ struct vtdbg_softc {
 
 /*
  * Subclass of vtmmio_softc that also lets the virtio device access
- * the character device's bounce buffer - related information.
+ * vtdbg related information while also being usable from vtmmio_*
+ * methods. The vtdbg_softc * is the softc of the control device and 
+ * is allocated dynamically when opening an instance of the control device, 
+ * while the virtio_dbg_softc here is allocated during device_t creation.
  */
 struct virtio_dbg_softc {
 	struct vtmmio_softc	vtmdbg_mmio;
 	struct vtdbg_softc	*vtmdbg_dbg;
 };
 
+/*
+ * Store the parent bus and driver pointers for the debug devices,
+ * because we need them when creating debug devices on-demand later on.
+ * We are hanging off of the nexus, so we are certain it's not going away.
+ */
 static void
 virtio_dbg_identify(driver_t *driver, device_t parent)
 {
@@ -124,7 +133,7 @@ virtio_dbg_identify(driver_t *driver, device_t parent)
 }
 
 static struct vtdbg_softc *
-vtmmio_get_vtb(device_t dev)
+vtmmio_get_vtdbg(device_t dev)
 {
 	struct virtio_dbg_softc *sc;
 
@@ -134,6 +143,9 @@ vtmmio_get_vtb(device_t dev)
 	return (sc->vtmdbg_dbg);
 }
 
+/*
+ * Explicitly turn polling into a no-op.
+ */
 static int
 virtio_dbg_poll(device_t dev)
 {
@@ -142,6 +154,10 @@ virtio_dbg_poll(device_t dev)
 }
 
 
+/*
+ * Make sure the shared virtio device region between kernel and userspace
+ * is configured properly.
+ */
 static int
 virtio_dbg_probe(device_t dev)
 {
@@ -213,11 +229,11 @@ virtio_dbg_attach(device_t dev)
 }
 
 /*
- * Recompute the queue descriptor to be an offset within the shared
- * bhyve/kernel vq region. Our userspace cannot meaningfully translate 
+ * Recompute the queue descriptor to be an offset within the shared user/kernel
+ * device control region. Our userspace cannot meaningfully translate 
  * kernel physical addresses, so we transform the values in the queue
- * descriptor address registers into offsets. Userspace can add the offset
- * to its own virtual address for the common region to find the vq.
+ * descriptor address registers into offsets. Userspace finds the vq address 
+ * by adding the offset to its own virtual address for the region.
  */
 static void
 virtio_dbg_qdesc_offset(struct vtmmio_softc *sc, uint64_t baseaddr,
@@ -239,6 +255,7 @@ virtio_dbg_qdesc_offset(struct vtmmio_softc *sc, uint64_t baseaddr,
 	hi = (qaddr >> 32);
 	lo = (qaddr & ((1ULL << 32) - 1));
 	
+	/* Direct bus write because to avoid triggering note(). */
 	bus_write_4(res, hireg, hi);
 	bus_write_4(res, loreg, lo);
 }
@@ -258,7 +275,7 @@ virtio_dbg_note(device_t dev, size_t offset, int val)
 	 * Intercept writes to the QUEUE_{DESC, AVAIL, USED}_{HIGH, LOW} 
 	 * registers and instead pass to the user the offset from the beginning 
 	 * of the control region. Do not actually notify userspace of the writes,
-	 * it will be notified once we set VIRTIO_MMIO_QUEUE_READY.
+	 * we will recompute and notify once we set VIRTIO_MMIO_QUEUE_READY.
 	 *
 	 * Both high and low registers are set together, so just track writes to
 	 * the high address bits.
@@ -315,7 +332,7 @@ virtio_dbg_note(device_t dev, size_t offset, int val)
 
 	/* 
 	 * We cannot sleep here because this code is called holding non-sleepable locks.
-	 * This is because this busy wait's corresponding operations for other transports is 
+	 * This is because this busy wait's corresponding operation for other transports is 
 	 * a VM exit, which is instantaneous from the point of view of the guest kernel.
 	 * To prevent a "sleeping thread" panic, we busy wait here. There is always the
 	 * danger of our VMM process leaving us hanging, but that is always a danger even
@@ -342,7 +359,7 @@ virtio_dbg_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *ih_u
 {
 	struct vtdbg_softc *sc;
 
-	sc = vtmmio_get_vtb(dev);
+	sc = vtmmio_get_vtdbg(dev);
 	MPASS(sc->vtd_magic == VTDBG_MAGIC);
 
 	mtx_lock(&sc->vtd_mtx);
@@ -355,6 +372,7 @@ virtio_dbg_setup_intr(device_t dev, device_t mmio_dev, void *handler, void *ih_u
 
 static device_method_t virtio_dbg_methods[] = {
         /* Device interface. */
+	/* XXX Do we need the generics here. */
 	DEVMETHOD(bus_add_child,		bus_generic_add_child),
 	DEVMETHOD(bus_alloc_resource,		bus_generic_alloc_resource),
 	DEVMETHOD(bus_release_resource,		bus_generic_release_resource),
@@ -547,7 +565,7 @@ vtdbg_mmap_single(struct cdev *cdev, vm_ooffset_t *offset,
 static void *
 vtdbg_ringalloc(device_t dev, size_t size)
 {
-	struct vtdbg_softc *sc = vtmmio_get_vtb(dev);
+	struct vtdbg_softc *sc = vtmmio_get_vtdbg(dev);
 	void *mem;
 
 	MPASS(sc->vtd_magic == VTDBG_MAGIC);
