@@ -407,17 +407,11 @@ mmio_vtblk_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 	sc = arg;
 
 	sc->vbsc_cfg->vbc_capacity = new_size / VTBLK_BSIZE; /* 512-byte units */
-	/* XXX Handle resizing: 
-	 *
-	 * - Update the status register to be an interrupt .
-	 * - Mark a config change. 
-	 * - Hit the interrupt. 
-	 */
-	printf("UNIMPLEMENTED RESIZE\n");
-	assert(0);
+	/* XXX Handle resizing. */
+	printf("UNIMPLEMENTED %s\n", __func__);
+	exit(1);
 }
 
-/* XXX This callback is not necessary in bhyve. Determine why it ended up existing. */
 static void
 mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 {
@@ -436,8 +430,7 @@ mmio_vtblk_event(int fd, enum ev_type type, void *arg, uint64_t offset)
 static int
 mmio_vtblk_init(struct mmio_devinst *mdi, nvlist_t *nvl)
 {
-	/* XXX This change is unnecessary. Fix this. */
-	char bident[PATH_MAX];
+	char bident[MI_NAMESZ];
 	struct blockif_ctxt *bctxt;
 	const char *path, *serial;
 	MD5_CTX mdctx;

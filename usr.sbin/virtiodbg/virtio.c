@@ -83,6 +83,46 @@ vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,
 }
 
 /*
+ * Deliver an interrupt to the guest on the given virtual queue.
+ *
+ * XXX Instead of handling the interrupt from the userspace thread, have
+ * a dedicated kernel thread for interrupting as noted in the transport.
+ */
+
+struct vq_interrupt_args {
+	pthread_t thr;
+	int fd;
+};
+
+static void *
+vq_do_interrupt(void *arg)
+{
+	struct vq_interrupt_args *args = (struct vq_interrupt_args *)arg;
+	int fd = args->fd;
+	int error;
+
+	error = ioctl(fd, VIRTIO_DBG_KICK);
+	if (error != 0)
+		EPRINTLN("device kick failed with %d\n", error);
+
+	free(arg);
+
+	pthread_exit(NULL);
+
+}
+
+static void
+vq_interrupt(struct virtio_softc *vs)
+{
+	struct vq_interrupt_args *arg = malloc(sizeof(*arg));
+	
+	arg->fd = vs->vs_mi->mi_fd;
+
+	mmio_set_cfgdata32(vs->vs_mi, VIRTIO_MMIO_INTERRUPT_STATUS, VIRTIO_MMIO_INT_VRING);
+	pthread_create(&arg->thr, NULL, vq_do_interrupt, (void *)arg);
+}
+
+/*
  * Reset device (device-wide).  This erases all queues, i.e.,
  * all the queues become invalid (though we don't wipe out the
  * internal pointers, we just clear the VQ_ALLOC flag).
@@ -122,7 +162,7 @@ vi_reset_dev(struct virtio_softc *vs)
  * The guest just gave us a page frame number, from which we can
  * calculate the addresses of the queue.
  */
-/* XXX Switch it back to using the softc. */
+/* XXX Switch it back to using the virtio softc. */
 static void
 vi_vq_init(struct mmio_devinst *mdi, struct vqueue_info *vq)
 {
@@ -163,7 +203,8 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 	if (i >= n_iov)
 		return;
 
-	/* XXX Add error handling. */
+	/* XXX Handle OOM scenarios leading to iove_add failures. */
+
 	/* Preallocate a descriptor data region for the descriptor */
 	if ((vd->flags & VRING_DESC_F_WRITE) == 0) {
 		if (iove_add(riove, vd->addr, vd->len, &iov[i]) != 0)
@@ -182,8 +223,9 @@ _vq_record(int i, struct vring_desc *vd, struct iovec *iov,
 static int
 vq_import_indirect(struct vring_desc __unused **vdp)
 {
-	/* XXX Use the PFN to make a single IO. */
-	assert(0);
+	/* XXX Use the provided vd address to read in the indirect descriptor */
+	printf("UNIMPLEMENTED %s\n", __func__);
+	exit(1);
 }
 
 /*
@@ -360,9 +402,7 @@ vq_getchain(struct vqueue_info *vq, struct iovec *iov, int niov,
 error:
 	iove_free(riove);
 	iove_free(wiove);
-
-	/* XXX Reactivate once we handle indirect descriptors. */
-	//free(vindir);
+	free(vindir);
 
 	return (-1);
 
@@ -370,9 +410,7 @@ done:
 	/* Read in readable descriptors from the kernel. */
 	error = iove_import(fd, riove);
 	iove_free(riove);
-
-	/* XXX Reactivate once we handle indirect descriptors. */
-	//free(vindir);
+	free(vindir);
 
 	if (error != 0) {
 		EPRINTLN("Reading in data failed with %d", error);
@@ -500,19 +538,7 @@ vq_endchains(struct vqueue_info *vq, int used_all_avail)
 		    !(vq->vq_avail->flags & VRING_AVAIL_F_NO_INTERRUPT);
 	}
 	if (intr)
-		vq_interrupt(vs, vq);
-}
-
-void *vq_make_interrupt(void *arg)
-{
-	int fd = (int)(uint64_t)arg;
-	int error;
-
-	error = ioctl(fd, VIRTIO_DBG_KICK);
-	if (error != 0)
-		EPRINTLN("device kick failed with %d\n", error);
-	pthread_exit(NULL);
-
+		vq_interrupt(vs);
 }
 
 /* Note: these are in sorted order to make for a fast search */
@@ -654,9 +680,8 @@ vi_handle_guest_features(struct virtio_softc *vs, uint32_t features)
 	int hi;
 
 	/* 
-	 * XXX Make sure that here and everywhere else we are 
-	 * in the proces of negotiating and not in the middle of
-	 * operation.
+	 * XXX Add asserts to ensure we are negotiating w/ the device
+	 * and not in the middle of an operation.
 	 */
 
 	hi = mmio_get_cfgdata32(mdi, VIRTIO_MMIO_GUEST_FEATURES_SEL);

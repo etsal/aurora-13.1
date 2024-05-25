@@ -79,7 +79,10 @@ mmio_emul_control_init(struct mmio_devinst *mdi, struct mmio_devemu *mde, nvlist
 	mdi->mi_addr = mmio;
 	mdi->mi_bytes = MMIO_TOTAL_SIZE;
 
-	/* XXX Find the device type based on the environment. */
+	/* 
+	 * XXX Hack. We currently hardwire the block device ID. Propagate
+	 * the device type in a different way.
+	 */
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC_VIRT);
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_VERSION, 0x2);
 	mmio_set_cfgdata32(mdi, VIRTIO_MMIO_DEVICE_ID, 0x2);

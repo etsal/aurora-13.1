@@ -269,22 +269,6 @@ vq_has_descs(struct vqueue_info *vq)
 	    vq->vq_avail->idx);
 }
 
-/*
-}
- * Deliver an interrupt to the guest on the given virtual queue (if
- * possible, or a generic MSI interrupt if not using MSI-X).
- */
-void *vq_make_interrupt(void *arg);
-#include <pthread.h>
-static inline void
-vq_interrupt(struct virtio_softc *vs, struct vqueue_info __unused *vq)
-{
-	/* XXX Gross hack */
-	pthread_t *thr = malloc(sizeof(*thr));
-
-	mmio_set_cfgdata32(vs->vs_mi, VIRTIO_MMIO_INTERRUPT_STATUS, VIRTIO_MMIO_INT_VRING);
-	pthread_create(thr, NULL, vq_make_interrupt, (void *)(uint64_t)vs->vs_mi->mi_fd);
-}
 
 static inline void
 vq_kick_enable(struct vqueue_info *vq)

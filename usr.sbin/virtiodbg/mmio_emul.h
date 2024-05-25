@@ -37,7 +37,6 @@
 
 #include <assert.h>
 
-/* XXX Where did this come from? */
 #define MI_NAMESZ (40)
 
 struct mmio_devinst;
@@ -71,7 +70,7 @@ struct mmio_devinst {
 	enum mmio_devstate	mi_state;	
 };
 
-/* XXX Sensible default until proven otherwise. But we need to link it with the in-kernel definition. */
+/* XXX Sensible default until proven otherwise. But we need to link it with the in-kernel header. */
 #define MMIO_TOTAL_SIZE (1024 * 1024 * 10)
 #define MMIO_CTRDEV ("/dev/vtdbg")
 
