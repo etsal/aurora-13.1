@@ -33,6 +33,7 @@ TESTS_SUBDIRS+=		posixshm
 TESTS_SUBDIRS+=		ses
 TESTS_SUBDIRS+=		sys
 TESTS_SUBDIRS+=		vfs
+TESTS_SUBDIRS+=		virtio
 TESTS_SUBDIRS+=		vm
 TESTS_SUBDIRS+=		vmm
 
