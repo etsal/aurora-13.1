@@ -394,9 +394,7 @@ static device_method_t virtio_dbg_methods[] = {
 DEFINE_CLASS_1(virtio_dbg, virtio_dbg_driver, virtio_dbg_methods,
     sizeof(struct vtdbg_softc), vtmmio_driver);
 /*
- * XXX As noted below, we should be hanging off of the ram pseudodevice
- * so we can reserve part of the real physical memory for our device. This
- * is a significant task so avoid it for now.
+ * XXX We are currently hanging off of the nexus, not 100% it's the right way.
  */
 DRIVER_MODULE(virtio_dbg, nexus, virtio_dbg_driver, 0, 0);
 MODULE_VERSION(virtio_dbg, 1);
@@ -527,8 +525,6 @@ vtdbg_dtor(void *arg)
 		mtx_unlock(&Giant);
 
 		free(devsc->vtmdbg_mmio.res[0], M_DEVBUF);
-		bus_release_resource(dev, SYS_RES_MEMORY, 0,
-				devsc->vtmdbg_mmio.res[0]);
 		device_delete_child(vtdbg_parent, dev);
 	}
 
@@ -656,11 +652,12 @@ vtdbg_create_transport(device_t parent, struct vtdbg_softc *vtdsc)
 
 	/* 
 	 * XXX Hack. Create the resource out of thin air to
-	 * keep the vtmmio_write_* calls working. Ideally we would
-	 * be reserving the resource out of the RAM pseudobus,
+	 * keep the vtmmio_write_* calls working. If we wanted to be uniform 
+	 * would be reserving the resource out of the RAM pseudobus,
 	 * but it has no associated struct rman * instance,
-	 * and multiple arch-specific implementations. Changing
-	 * it would require significant effort.
+	 * and we have already reserved this memory region
+	 * by allocating it anyway so there is no possiblity
+	 * of conflicts..
 	 */
 	res = malloc(sizeof(*res), M_DEVBUF, M_WAITOK);
 	res->r_bushandle = vtdsc->vtd_baseaddr;
@@ -733,9 +730,12 @@ vtdbg_init(void)
 err:
 	sc = device_get_softc(transport);
 
-	bus_release_resource(transport, SYS_RES_MEMORY, 0,
-			sc->vtmdbg_mmio.res[0]);
-	free(sc->vtmdbg_mmio.res[0], M_DEVBUF);
+	/* 
+	 * Release the resource but do not notify
+	 * the parent bus as we didn't reserve it
+	 * from it.
+	 */
+	free(devsc->vtmdbg_mmio.res[0], M_DEVBUF);
 
 	mtx_lock(&Giant);
 	device_delete_child(vtdbg_parent, transport);
