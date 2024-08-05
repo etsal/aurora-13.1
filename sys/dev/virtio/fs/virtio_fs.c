@@ -73,23 +73,11 @@ static int	vtfs_modevent(module_t, int, void *);
 static int	vtfs_probe(device_t);
 static int	vtfs_attach(device_t);
 static int	vtfs_detach(device_t);
-static int	vtfs_suspend(device_t);
-static int	vtfs_resume(device_t);
-static int	vtfs_shutdown(device_t);
-static int	vtfs_attach_completed(device_t);
-static int	vtfs_config_change(device_t);
 
 static device_method_t vtfs_methods[] = {
 	DEVMETHOD(device_probe,		vtfs_probe),
 	DEVMETHOD(device_attach,	vtfs_attach),
 	DEVMETHOD(device_detach,	vtfs_detach),
-	DEVMETHOD(device_suspend,	vtfs_suspend),
-	DEVMETHOD(device_resume,	vtfs_resume),
-	DEVMETHOD(device_shutdown,	vtfs_shutdown),
-
-	DEVMETHOD(virtio_attach_completed, vtfs_attach_completed),
-	DEVMETHOD(virtio_config_change, vtfs_config_change),
-
 	DEVMETHOD_END
 };
 
@@ -130,41 +118,6 @@ static int
 vtfs_probe(device_t dev)
 {
 	return (VIRTIO_SIMPLE_PROBE(dev, vtfs));
-}
-
-static int
-vtfs_suspend(device_t dev)
-{
-	VTFS_DEBUG("invoked");
-	return (0);	
-}
-
-static int
-vtfs_resume(device_t dev)
-{
-	VTFS_DEBUG("invoked");
-	return (0);
-}
-
-static int
-vtfs_shutdown(device_t dev)
-{
-	VTFS_DEBUG("invoked");
-	return (0);	
-}
-
-static int
-vtfs_attach_completed(device_t dev)
-{
-	VTFS_DEBUG("vtfs ready");
-	return (0);
-}
-
-static int
-vtfs_config_change(device_t dev)
-{
-	VTFS_DEBUG("invoked");
-	return (0);
 }
 
 static int
