@@ -228,22 +228,16 @@ virtiofs_cb_complete_ticket(void *xtick)
 	fuse_ticket_drop(ftick);
 }
 
-/* 
- * XXX Possibly roll this into fusefs_vfsop_mount, turns out they are very similar.
- * At least refactor virtiofs_vfsop_mount and reuse its logic here.
- */
 static int
 virtiofs_vfsop_mount(struct mount *mp)
 {
 	struct thread *td = curthread;
+	const uint64_t mntopts = 0;
 	struct vfsoptlist *opts;
 	struct fuse_data *data;
-	int daemon_timeout;
 	vtfs_instance vtfs;
 	uint32_t max_read;
 	int linux_errnos;
-	uint64_t mntopts;
-	char *subtype;
 	char *tag;
 	int error;
 
@@ -251,19 +245,9 @@ virtiofs_vfsop_mount(struct mount *mp)
 	if (opts == NULL)
 		return (EINVAL);
 
-	/*
-	 * TODO: Add DAX mode parameters.
-	 * Can wait until we add DAX mode.
-	 */
-
 	/* `fspath' contains the mount point (eg. /mnt/guestfs); REQUIRED */
 	if (!vfs_getopts(opts, "fspath", &error))
 		return (error);
-
-	mntopts = 0;
-	vfs_flagopt(opts, "push_symlinks_in", &mntopts, FSESS_PUSH_SYMLINKS_IN);
-	vfs_flagopt(opts, "default_permissions", &mntopts, FSESS_DEFAULT_PERMISSIONS);
-	vfs_flagopt(opts, "intr", &mntopts, FSESS_INTR);
 
 	max_read = maxbcachebuf;
 	(void)vfs_scanopt(opts, "max_read=", "%u", &max_read);
@@ -271,15 +255,10 @@ virtiofs_vfsop_mount(struct mount *mp)
 	linux_errnos = 0;
 	(void)vfs_scanopt(opts, "linux_errnos", "%d", &linux_errnos);
 
-	/* XXX Handle timeout */
-	daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
 
-	subtype = vfs_getopts(opts, "subtype=", &error);
-
-	if (mp->mnt_flag & MNT_UPDATE) {
-		/* XXX Handle remount. */
-		panic("Unhandled");
-	}
+	/* XXX Remounts not handled for now, but should be easy to code in. */
+	if (mp->mnt_flag & MNT_UPDATE)
+		return (EOPNOTSUPP);
 
 	/* `from' contains the virtio tag; REQUIRED */
 	tag = vfs_getopts(opts, "tag", &error);
@@ -315,9 +294,15 @@ virtiofs_vfsop_mount(struct mount *mp)
 	/* XXX Permission checks on whether we are allowed to mount the virtiofs. */
 
 	data->mp = mp;
+	/* 
+	 * XXX We currently do not support any mount options. This is due because it is
+	 * hard to test for it, even though most FUSE options should be trivially easy
+	 * to add. Deliberately defer enabling them until we can reuse the FUSE test
+	 * suite for virtiofs.
+	 */
 	data->dataflags |= mntopts | FSESS_VIRTIOFS;
 	data->max_read = max_read;
-	data->daemon_timeout = daemon_timeout;
+	data->daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
 	data->linux_errnos = linux_errnos;
 	data->mnt_flag = mp->mnt_flag & MNT_UPDATEMASK;
 	FUSE_UNLOCK();
@@ -337,10 +322,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	MNT_IUNLOCK(mp);
 	
 	mp->mnt_stat.f_iosize = maxbcachebuf;
-	if (subtype) {
-		strlcat(mp->mnt_stat.f_fstypename, ".", MFSNAMELEN);
-		strlcat(mp->mnt_stat.f_fstypename, subtype, MFSNAMELEN);
-	}
+	strlcat(mp->mnt_stat.f_fstypename, ".virtiofs", MFSNAMELEN);
 	memset(mp->mnt_stat.f_mntfromname, 0, MNAMELEN);
 	strlcpy(mp->mnt_stat.f_mntfromname, tag, MNAMELEN);
 	mp->mnt_iosize_max = maxphys;
