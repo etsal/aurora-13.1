@@ -217,7 +217,8 @@ vtfs_init_fsq(struct vtfs_softc *sc, int id)
 	if (fsq->vtfsq_tq == NULL)
 		return (ENOMEM);
 
-	error = taskqueue_start_threads(&fsq->vtfsq_tq, 4, PVM, "VirtioFS device");
+	error = taskqueue_start_threads(&fsq->vtfsq_tq, VTFS_TQTHREAD,
+		PVM, "VirtioFS device");
 	if (error != 0)
 		return (error);
 
