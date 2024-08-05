@@ -138,7 +138,7 @@ vtfs_read_config(struct vtfs_softc *sc)
 		sizeof(&sc->vtfs_nqs));
 
 	if (sc->vtfs_nqs <= 0) {
-		VTFS_ERR("read negative queue number from host");
+		VTFS_ERR("read non-positive queue number from host");
 		return (EINVAL);
 	}
 
