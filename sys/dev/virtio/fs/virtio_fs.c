@@ -230,7 +230,7 @@ again:
 	while  ((ftick = virtqueue_dequeue(vq, NULL)) != NULL)
 		fsq->vtfsq_cb(ftick);
 
-	/* XXX This fails if the host is not reading fast enough. */
+	/* If the host pushed another descriptor in the meantime, go again. */
 	if (virtqueue_enable_intr(vq) != 0) {
 		virtqueue_disable_intr(vq);
 		goto again;
