@@ -171,12 +171,18 @@ vtfs_vq_intr(void *xfsq)
 	struct virtqueue *vq = fsq->vtfsq_vq;
 	void *ftick;
 
+	/* XXX This might be possible during unload. */
 	if (fsq->vtfsq_cb == NULL)
 		panic("missing virtiofs fuse callback");
 
 	FSQ_LOCK(fsq);
 
 again:
+	/* 
+	 * XXX Check whether we are being unloaded? Maybe the same issue
+	 * as above.
+	 */
+
 	/* Go through the tickets one by one, invoke the fuse callback. */
 	while  ((ftick = virtqueue_dequeue(vq, NULL)) != NULL)
 		fsq->vtfsq_cb(ftick);
