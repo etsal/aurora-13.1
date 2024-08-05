@@ -116,7 +116,7 @@ virtiofs_enqueue(struct fuse_ticket *ftick)
 
 	error = vtfs_enqueue(data->vtfs, ftick, sg, readable, writable, urgent);
 
-	/* 
+	/*
 	 * The enqueue call destroys the scatter-gather array both on success and
 	 * on failure, so no need to clean it up.
 	 */
@@ -145,13 +145,6 @@ virtiofs_flush(void *xdata, int __unused pending)
 	while (!STAILQ_EMPTY(&data->ms_head)) {
 		ftick = STAILQ_FIRST(&data->ms_head);
 
-		error = virtiofs_enqueue(ftick);
-		if (error != 0) {
-			if (error == EBUSY)
-				error = 0;
-			break;
-		} 
-
 		STAILQ_REMOVE_HEAD(&data->ms_head, tk_ms_link);
 		data->ms_count--;
 
@@ -164,6 +157,18 @@ virtiofs_flush(void *xdata, int __unused pending)
 
 		FUSE_ASSERT_MS_DONE(ftick);
 		fuse_ticket_drop(ftick);
+
+		/*
+		 * The enqueue operation is synchronous and may sleep,
+		 * so drop the session lock - we have already adjusted
+		 * all session fields so we don't need it while flushing
+		 * to the virtio device anyway.
+		 */
+		fuse_lck_mtx_unlock(data->ms_mtx);
+		error = virtiofs_enqueue(ftick);
+		fuse_lck_mtx_lock(data->ms_mtx);
+		if (error != 0)
+			break;
 	}
 
 	fuse_lck_mtx_unlock(data->ms_mtx);
