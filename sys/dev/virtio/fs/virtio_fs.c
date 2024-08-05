@@ -194,9 +194,9 @@ vtfs_read_config(struct vtfs_softc *sc)
 	/* Account for the priority queue. */
 	sc->vtfs_nqs += 1;
 
-	virtio_read_device_config(dev,
+	virtio_read_device_config_array(dev,
 		offsetof(struct vtfs_config, tag),
-		sc->vtfs_tag, TAG_SIZE);
+		sc->vtfs_tag, 1, TAG_SIZE);
 
 	/* The read tag may not be NUL-terminated. */
 	taglen = strnlen(sc->vtfs_tag, TAG_SIZE);
