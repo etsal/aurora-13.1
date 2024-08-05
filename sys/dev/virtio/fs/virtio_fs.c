@@ -93,8 +93,6 @@ MODULE_DEPEND(vtfs, virtio, 1, 1, 1);
 
 VIRTIO_SIMPLE_PNPINFO(vtfs, VIRTIO_ID_FS, "VirtIO FS Adapter");
 
-/* Module load/unload logic. */
-
 static int
 vtfs_modevent(module_t mod, int type, void *unused)
 {
