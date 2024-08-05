@@ -28,6 +28,7 @@ struct vtfs_config {
 /* A queue structure belonging to a virtio fs device. */
 struct vtfs_fsq {
 	struct mtx		vtfsq_mtx;
+	struct cv		vtfsq_cv;
 	struct virtqueue	*vtfsq_vq;
 	struct taskqueue	*vtfsq_tq;
 	struct sglist 		*vtfsq_sg;

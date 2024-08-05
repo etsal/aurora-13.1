@@ -33,6 +33,7 @@
 #include <sys/lock.h>
 #include <sys/queue.h>
 #include <sys/systm.h>
+#include <sys/condvar.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
@@ -67,6 +68,8 @@ MTX_SYSINIT(vtfs_mod_mtx, &vtfs_mod_mtx, "Virtio FS Global Lock", MTX_DEF);
 
 #define FSQ_LOCK(_fsq)		mtx_lock(&(_fsq)->vtfsq_mtx)
 #define FSQ_UNLOCK(_fsq)	mtx_unlock(&(_fsq)->vtfsq_mtx)
+#define FSQ_WAIT(_fsq)		cv_wait(&(_fsq)->vtfsq_cv, &(_fsq)->vtfsq_mtx)
+#define FSQ_KICK(_fsq)		cv_broadcast(&(_fsq)->vtfsq_cv)
 
 static int	vtfs_modevent(module_t, int, void *);
 
@@ -193,6 +196,7 @@ again:
 		goto again;
 	}
 
+	FSQ_KICK(fsq);
 	FSQ_UNLOCK(fsq);
 }
 
@@ -211,6 +215,7 @@ vtfs_init_fsq(struct vtfs_softc *sc, int id)
 	}
 
 	mtx_init(&fsq->vtfsq_mtx, fsq->vtfsq_name, NULL, MTX_DEF);
+	cv_init(&fsq->vtfsq_cv, "fsqvqcv");
 
 	fsq->vtfsq_tq = taskqueue_create("vtfsqtq", M_WAITOK, 
 			taskqueue_thread_enqueue, &fsq->vtfsq_tq);
@@ -243,8 +248,10 @@ vtfs_fini_fsq(struct vtfs_fsq *fsq)
 		fsq->vtfsq_tq = NULL;
 	}
 
-	if (mtx_initialized(&fsq->vtfsq_mtx) != 0)
+	if (mtx_initialized(&fsq->vtfsq_mtx) != 0) {
+		cv_destroy(&fsq->vtfsq_cv);
 		mtx_destroy(&fsq->vtfsq_mtx);
+	}
 
 	VTFS_DEBUG("vq %s destroyed", fsq->vtfsq_name);
 }
@@ -506,8 +513,6 @@ vtfs_unregister_cb(struct vtfs_softc *sc)
 
 }
 
-/* XXX Hacky implementation to get a prototype running. */
-/* XXX Track in-flight requests. */
 int
 vtfs_enqueue(struct vtfs_softc *sc, void *ftick, struct sglist *sg,
 	int readable, int writable, bool urgent)
@@ -516,10 +521,6 @@ vtfs_enqueue(struct vtfs_softc *sc, void *ftick, struct sglist *sg,
 	struct vtfs_fsq *fsq;
 	int error;
 
-	/* 
-	 * XXX Do we even need multiple request queues if no
-	 * host implements them?
-	 */
 	if (urgent)
 		fsq = &sc->vtfs_fsqs[VTFS_FORGET_FSQ];
 	else
@@ -531,8 +532,15 @@ vtfs_enqueue(struct vtfs_softc *sc, void *ftick, struct sglist *sg,
 	KASSERT(sg->sg_nseg == readable + writable, ("inconsistent segmentation"));
 
 	error = virtqueue_enqueue(vq, ftick, sg, readable, writable);
-	if (error == 0)
-		virtqueue_notify(vq);
+	while (error == ENOSPC) {
+		FSQ_WAIT(fsq);
+		error = virtqueue_enqueue(vq, ftick, sg, readable, writable);
+	}
+
+	if (error != 0)
+		return (error);
+	
+	virtqueue_notify(vq);
 
 	FSQ_UNLOCK(fsq);
 	sglist_free(sg);
