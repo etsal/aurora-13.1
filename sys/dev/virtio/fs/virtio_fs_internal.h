@@ -21,6 +21,8 @@ struct vtfs_config {
 	uint8_t tag[TAG_SIZE];
 	/* Number of request queues. */
 	uint32_t num_request_queues;
+	/* Minimum # bytes for each buffer in the notification queue. */
+	uint32_t notify_buf_size;
 } __packed;
 
 /* A queue structure belonging to a virtio fs device. */
