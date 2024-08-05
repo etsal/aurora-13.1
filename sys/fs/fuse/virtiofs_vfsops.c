@@ -180,15 +180,13 @@ virtiofs_flush(void *xdata, int __unused pending)
 }
 
 static void
-virtiofs_cb_drop_ticket(void *xtick)
+virtiofs_cb_forget_ticket(void *xtick)
 {
 	struct fuse_ticket *ftick = xtick;
 
 	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
 	KASSERT(!fticket_answered(ftick), ("ticket already answered"));
 	fuse_lck_mtx_unlock(ftick->tk_aw_mtx);
-
-	fuse_ticket_drop(ftick);
 }
 
 static void
@@ -292,7 +290,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	if (vtfs == NULL)
 		return (error);
 
-	vtfs_register_cb(vtfs, virtiofs_cb_drop_ticket, virtiofs_cb_complete_ticket);
+	vtfs_register_cb(vtfs, virtiofs_cb_forget_ticket, virtiofs_cb_complete_ticket);
 
 	/* 
 	 * XXX Retrieve the session from the device if it already exists,
