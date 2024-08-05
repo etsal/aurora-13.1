@@ -28,7 +28,6 @@
 /* Device for the VirtIO file system. */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/lock.h>
@@ -59,14 +58,10 @@ struct vtfs_softc;
 
 /* Module-wide device list. */
 
-/* 
- * XXX Are these static initalizations fine if we compile the driver as a module?
- * Or do we need to initialize the head and mutex in vtfs_modevent? I tried it and 
- * the system crashes becasue the mutex is getting initialized multiple times.
- */
 LIST_HEAD(, vtfs_softc) vtfs_contexts = LIST_HEAD_INITIALIZER(vtfs_contexts);
 struct mtx vtfs_mod_mtx;
 MTX_SYSINIT(vtfs_mod_mtx, &vtfs_mod_mtx, "Virtio FS Global Lock", MTX_DEF);
+
 #define VTFS_LOCK()		mtx_lock(&vtfs_mod_mtx)
 #define VTFS_UNLOCK()		mtx_unlock(&vtfs_mod_mtx)
 
