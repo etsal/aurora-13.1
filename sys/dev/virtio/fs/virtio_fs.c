@@ -129,8 +129,8 @@ vtfs_read_config(struct vtfs_softc *sc)
 
 	dev = sc->vtfs_dev;
 
-	KASSERT(sizeof(sc->vtfs_nqs) == sizeof(fscfg.num_request_queues),
-		("reading num_request_queues into wrongly typed struct"));
+	_Static_assert(sizeof(sc->vtfs_nqs) == sizeof(fscfg.num_request_queues),
+		"reading num_request_queues into wrongly typed struct");
 
 	virtio_read_device_config(dev,
 		offsetof(struct vtfs_config, num_request_queues),
