@@ -360,10 +360,9 @@ vtfs_alloc_virtqueues(struct vtfs_softc *sc)
 		return (ENOMEM);
 
 	for (i = 0; i < nqs; i++) {
-		/* XXX Decide on the maximum number of segments. */
 		fsq = &sc->vtfs_fsqs[i];
-		VQ_ALLOC_INFO_INIT(&vq_info[i], 8, vtfs_vq_intr, fsq,
-			&fsq->vtfsq_vq, "%s", fsq->vtfsq_name);
+		VQ_ALLOC_INFO_INIT(&vq_info[i], VTFS_MAXSEGS, vtfs_vq_intr, 
+			fsq, &fsq->vtfsq_vq, "%s", fsq->vtfsq_name);
 	}
 
 	error = virtio_alloc_virtqueues(dev, nqs, vq_info);

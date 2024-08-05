@@ -48,4 +48,6 @@ struct vtfs_softc {
 #define VTFS_FORGET_FSQ (0)
 #define VTFS_REGULAR_FSQ (1)
 
+#define VTFS_MAXSEGS (16)
+
 #endif /* _VIRTIO_FS_INTERNAL_ */
