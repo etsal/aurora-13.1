@@ -271,10 +271,6 @@ virtiofs_vfsop_mount(struct mount *mp)
 
 	vtfs_register_cb(vtfs, virtiofs_cb_forget_ticket, virtiofs_cb_complete_ticket);
 
-	/* 
-	 * XXX Retrieve the session from the device if it already exists,
-	 * and only create a new one if it does not .
-	 */
 	data = fdata_alloc(NULL, td->td_ucred);
 
 	FUSE_LOCK();
