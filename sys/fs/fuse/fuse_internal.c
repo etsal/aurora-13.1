@@ -652,7 +652,7 @@ fuse_internal_readdir_processdata(struct uio *uio,
 			err = -1;
 			break;
 		}
-		fiov_adjust(cookediov, oreclen, M_WAITOK);
+		fiov_adjust(cookediov, oreclen);
 		bzero(cookediov->base, oreclen);
 
 		de = (struct dirent *)cookediov->base;

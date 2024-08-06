@@ -83,12 +83,12 @@ struct fuse_iov {
 void fiov_init(struct fuse_iov *fiov, size_t size);
 void fiov_teardown(struct fuse_iov *fiov);
 void fiov_refresh(struct fuse_iov *fiov);
-int fiov_adjust(struct fuse_iov *fiov, size_t size, int flags);
+void fiov_adjust(struct fuse_iov *fiov, size_t size);
 
-#define FUSE_DIMALLOC(fiov, spc1, spc2, amnt) do {			\
-	fiov_adjust(fiov, (sizeof(*(spc1)) + (amnt)), M_WAITOK);	\
-	(spc1) = (fiov)->base;						\
-	(spc2) = (char *)(fiov)->base + (sizeof(*(spc1)));		\
+#define FUSE_DIMALLOC(fiov, spc1, spc2, amnt) do {		\
+	fiov_adjust(fiov, (sizeof(*(spc1)) + (amnt)));		\
+	(spc1) = (fiov)->base;					\
+	(spc2) = (char *)(fiov)->base + (sizeof(*(spc1)));	\
 } while (0)
 
 #define FU_AT_LEAST(siz) max((siz), 160)

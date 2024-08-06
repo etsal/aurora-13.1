@@ -279,18 +279,18 @@ fiov_teardown(struct fuse_iov *fiov)
 	free(fiov->base, M_FUSEMSG);
 }
 
-int
-fiov_adjust(struct fuse_iov *fiov, size_t size, int flags)
+void
+fiov_adjust(struct fuse_iov *fiov, size_t size)
 {
 	if (fiov->allocated_size < size ||
 	    (fuse_iov_permanent_bufsize >= 0 &&
 	    fiov->allocated_size - size > fuse_iov_permanent_bufsize &&
 	    --fiov->credit < 0)) {
 		fiov->base = realloc(fiov->base, FU_AT_LEAST(size), M_FUSEMSG,
-		    flags | M_ZERO);
-		if (fiov->base == NULL)
-			return (ENOMEM);
-
+		    M_WAITOK | M_ZERO);
+		if (!fiov->base) {
+			panic("FUSE: realloc failed");
+		}
 		fiov->allocated_size = FU_AT_LEAST(size);
 		fiov->credit = fuse_iov_credit;
 		/* Clear data buffer after reallocation */
@@ -300,15 +300,13 @@ fiov_adjust(struct fuse_iov *fiov, size_t size, int flags)
 		bzero((char*)fiov->base + fiov->len, size - fiov->len);
 	}
 	fiov->len = size;
-
-	return (0);
 }
 
 /* Resize the fiov if needed, and clear it's buffer */
 void
 fiov_refresh(struct fuse_iov *fiov)
 {
-	fiov_adjust(fiov, 0, M_WAITOK);
+	fiov_adjust(fiov, 0);
 }
 
 static int
@@ -525,7 +523,7 @@ fticket_aw_pull_uio(struct fuse_ticket *ftick, struct uio *uio)
 	size_t len = uio_resid(uio);
 
 	if (len) {
-		fiov_adjust(fticket_resp(ftick), len, M_WAITOK);
+		fiov_adjust(fticket_resp(ftick), len);
 		err = uiomove(fticket_resp(ftick)->base, len, uio);
 	}
 	return err;
