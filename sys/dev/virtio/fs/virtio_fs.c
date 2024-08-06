@@ -391,8 +391,8 @@ vtfs_remove(struct vtfs_softc *sc)
 	VTFS_UNLOCK();
 }
 
-struct vtfs_softc *
-vtfs_find(char *tag)
+int
+vtfs_find(char *tag, struct vtfs_softc **scp)
 {
 	struct vtfs_softc *sc;
 
@@ -403,15 +403,30 @@ vtfs_find(char *tag)
 			continue;
 
 		/* XXX Grab a reference for the sc. */
+		if (sc->vtfs_inuse) {
+			VTFS_UNLOCK();
+			return (EALREADY);
+		}
 
+		sc->vtfs_inuse = true;
 		VTFS_UNLOCK();
 
-		return (sc);
+		*scp = sc;
+
+		return (0);
 	}
 
 	VTFS_UNLOCK();
 
-	return (NULL);
+	return (EINVAL);
+}
+
+void
+vtfs_release(struct vtfs_softc *sc)
+{
+	VTFS_LOCK();
+	sc->vtfs_inuse = false;
+	VTFS_UNLOCK();
 }
 
 static int
@@ -422,6 +437,7 @@ vtfs_attach(device_t dev)
 
 	sc = device_get_softc(dev);
 	sc->vtfs_dev = dev;
+	sc->vtfs_inuse = false;
 
 	error = vtfs_read_config(sc);
 	if (error != 0)

@@ -265,8 +265,8 @@ virtiofs_vfsop_mount(struct mount *mp)
 	if (!tag)
 		return (error);
 
-	vtfs = vtfs_find(tag);
-	if (vtfs == NULL)
+	error = vtfs_find(tag, &vtfs);
+	if (error != 0)
 		return (error);
 
 	vtfs_register_cb(vtfs, virtiofs_cb_forget_ticket, virtiofs_cb_complete_ticket);
@@ -385,6 +385,7 @@ virtiofs_vfsop_unmount(struct mount *mp, int mntflags)
 	}
 
 	vtfs_drain(vtfs);
+	vtfs_release(vtfs);
 
 	fdata_set_dead(data);
 
