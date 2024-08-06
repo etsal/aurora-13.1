@@ -279,17 +279,19 @@ fiov_teardown(struct fuse_iov *fiov)
 	free(fiov->base, M_FUSEMSG);
 }
 
-void
-fiov_adjust(struct fuse_iov *fiov, size_t size)
+static int
+fiov_adjust_internal(struct fuse_iov *fiov, size_t size, int flag)
 {
+	KASSERT(flag == M_NOWAIT || flag == M_WAITOK, ("invalid flag %x", flag));
+
 	if (fiov->allocated_size < size ||
 	    (fuse_iov_permanent_bufsize >= 0 &&
 	    fiov->allocated_size - size > fuse_iov_permanent_bufsize &&
 	    --fiov->credit < 0)) {
 		fiov->base = realloc(fiov->base, FU_AT_LEAST(size), M_FUSEMSG,
-		    M_WAITOK | M_ZERO);
+		    flag | M_ZERO);
 		if (!fiov->base) {
-			panic("FUSE: realloc failed");
+			return (ENOMEM);
 		}
 		fiov->allocated_size = FU_AT_LEAST(size);
 		fiov->credit = fuse_iov_credit;
@@ -300,6 +302,26 @@ fiov_adjust(struct fuse_iov *fiov, size_t size)
 		bzero((char*)fiov->base + fiov->len, size - fiov->len);
 	}
 	fiov->len = size;
+
+	return(0);
+}
+
+int
+fiov_adjust_nowait(struct fuse_iov *fiov, size_t size)
+{
+	fiov_adjust_internal(fiov, size, M_NOWAIT);
+	if (!fiov->base)
+		return (ENOMEM);
+
+	return (0);
+}
+
+void
+fiov_adjust(struct fuse_iov *fiov, size_t size)
+{
+	fiov_adjust_internal(fiov, size, M_WAITOK);
+	if (!fiov->base)
+		panic("FUSE: realloc failed");
 }
 
 /* Resize the fiov if needed, and clear it's buffer */

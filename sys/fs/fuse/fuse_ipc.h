@@ -84,6 +84,7 @@ void fiov_init(struct fuse_iov *fiov, size_t size);
 void fiov_teardown(struct fuse_iov *fiov);
 void fiov_refresh(struct fuse_iov *fiov);
 void fiov_adjust(struct fuse_iov *fiov, size_t size);
+int fiov_adjust_nowait(struct fuse_iov *fiov, size_t size);
 
 #define FUSE_DIMALLOC(fiov, spc1, spc2, amnt) do {		\
 	fiov_adjust(fiov, (sizeof(*(spc1)) + (amnt)));		\
