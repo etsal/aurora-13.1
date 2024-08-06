@@ -278,10 +278,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	data = fdata_alloc(NULL, td->td_ucred);
 
 	FUSE_LOCK();
-	if (fdata_get_dead(data)) {
-		/* XXX Proper error handling. */
-		panic("Data is already dead");
-	}
+	KASSERT(!fdata_get_dead(data), ("allocated dead session"));
 
 	data->vtfs_tq = taskqueue_create("virtiofstq", M_NOWAIT, taskqueue_thread_enqueue, 
 			&data->vtfs_tq);
