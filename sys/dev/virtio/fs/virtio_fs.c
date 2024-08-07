@@ -172,6 +172,7 @@ vtfs_vq_intr(void *xfsq)
 {
 	struct vtfs_fsq *fsq = xfsq;
 	struct virtqueue *vq = fsq->vtfsq_vq;
+	uint32_t len;
 	void *ftick;
 
 	/* We turn off vtfs interrupts before removing the callback. */
@@ -181,8 +182,8 @@ vtfs_vq_intr(void *xfsq)
 
 again:
 	/* Go through the tickets one by one, invoke the fuse callback. */
-	while  ((ftick = virtqueue_dequeue(vq, NULL)) != NULL)
-		fsq->vtfsq_cb(ftick);
+	while  ((ftick = virtqueue_dequeue(vq, &len)) != NULL)
+		fsq->vtfsq_cb(ftick, len);
 
 	/* If the host pushed another descriptor in the meantime, go again. */
 	if (virtqueue_enable_intr(vq) != 0) {
@@ -485,7 +486,7 @@ vtfs_detach(device_t dev)
 
 void
 vtfs_register_cb(struct vtfs_softc *sc, vtfs_fuse_cb forget_cb,
-	vtfs_fuse_cb regular_cb, vtfs_fuse_cb detach_cb,
+	vtfs_fuse_cb regular_cb, vtfs_teardown_cb detach_cb,
 	void *detach_cb_arg)
 {
 	struct vtfs_fsq *fsq;
@@ -563,6 +564,7 @@ static void
 vtfs_drain_vq(struct vtfs_fsq *fsq)
 {
 	struct virtqueue *vq = fsq->vtfsq_vq;
+	uint32_t len;
 	void *ftick;
 
 	/* 
@@ -576,8 +578,8 @@ vtfs_drain_vq(struct vtfs_fsq *fsq)
 
 	vq = fsq->vtfsq_vq;
 
-	while ((ftick = virtqueue_dequeue(vq, NULL)) != NULL) {
-		fsq->vtfsq_cb(ftick);
+	while ((ftick = virtqueue_dequeue(vq, &len)) != NULL) {
+		fsq->vtfsq_cb(ftick, len);
 	}
 
 	KASSERT(virtqueue_empty(vq), ("virtqueue not empty"));

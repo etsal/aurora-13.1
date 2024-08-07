@@ -176,7 +176,7 @@ virtiofs_flush(void *xdata, int __unused pending)
 }
 
 static void
-virtiofs_cb_forget_ticket(void *xtick)
+virtiofs_cb_forget_ticket(void *xtick, uint32_t len __unused)
 {
 	struct fuse_ticket *ftick = xtick;
 
@@ -186,7 +186,7 @@ virtiofs_cb_forget_ticket(void *xtick)
 }
 
 static void
-virtiofs_cb_complete_ticket(void *xtick)
+virtiofs_cb_complete_ticket(void *xtick, uint32_t len)
 {
 	struct fuse_ticket *ftick = xtick;
 	struct fuse_data *data = ftick->tk_data;
@@ -326,9 +326,9 @@ virtiofs_vfsop_mount(struct mount *mp)
 }
 
 void
-virtiofs_teardown(void *arg)
+virtiofs_teardown(void *xdata)
 {
-	struct fuse_data *data = (struct fuse_data *)arg;
+	struct fuse_data *data = (struct fuse_data *)xdata;
 	vtfs_instance vtfs = data->vtfs;
 
 	/* Mark the session as dead to prevent new requests. */
