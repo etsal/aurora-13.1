@@ -202,9 +202,41 @@ virtiofs_drop_intr_tick(struct fuse_data *data, struct fuse_ticket *ftick)
 }
 
 static int
-virtiofs_handle_async_tick(struct mount *mp, struct fuse_ticket *ftick, uint32_t len)
+virtiofs_handle_async_tick(struct fuse_data *data, struct fuse_ticket *ftick, int oerror)
 {
-	panic("unimplemented");
+	struct mount *mp = data->mp;
+	struct iovec aiov;
+	struct uio uio;
+	int err;
+
+	/* 
+	 * Form a uio and pass it to the message handlers, because unlike other
+	 * messages they do not use ftick->tk_aw_fiov to store the message body.
+	 */
+	aiov.iov_base = fticket_resp(ftick)->base;
+	aiov.iov_len = fticket_resp(ftick)->len;
+
+	uio.uio_iov = (struct iovec *)&aiov;
+	uio.uio_iovcnt = 1;
+	uio.uio_resid = aiov.iov_len;
+	uio.uio_segflg = UIO_SYSSPACE;
+	uio.uio_rw = UIO_WRITE;
+	uio.uio_td = curthread;
+	uio.uio_offset = 0;
+
+	/* Only handle the two async messages that the FUSE device does. */
+	switch (oerror) {
+	case FUSE_NOTIFY_INVAL_ENTRY:
+		err = fuse_internal_invalidate_entry(mp, &uio);
+		break;
+	case FUSE_NOTIFY_INVAL_INODE:
+		err = fuse_internal_invalidate_inode(mp, &uio);
+		break;
+	default:
+		err = ENOSYS;
+	}
+
+	return (err);
 }
 
 static void
@@ -213,7 +245,6 @@ virtiofs_cb_complete_ticket(void *xtick, uint32_t len)
 	struct fuse_ticket *ftick = xtick;
 	struct fuse_data *data = ftick->tk_data;
 	struct fuse_out_header *ohead = &ftick->tk_aw_ohead;
-	struct mount *mp = data->mp;
 	int err;
 
 	/* Validate the length field of the out header. */
@@ -243,7 +274,7 @@ virtiofs_cb_complete_ticket(void *xtick, uint32_t len)
 	fuse_lck_mtx_unlock(data->aw_mtx);
 
 	if (ohead->unique == 0) {
-		if (virtiofs_handle_async_tick(mp, ftick, len) != 0)
+		if (virtiofs_handle_async_tick(data, ftick, ohead->error) != 0)
 			goto fail;
 		return;
 	}
@@ -251,6 +282,12 @@ virtiofs_cb_complete_ticket(void *xtick, uint32_t len)
 	if (ftick->tk_aw_handler) {
 		/* Sanitize the linuxism of negative errnos */
 		ohead->error *= -1;
+
+		/* Check whether the message body has the right size. */
+		err = fuse_body_audit(ftick, len - sizeof(*ohead));
+		if (err != 0)
+			goto fail;
+
 		if (ohead->error < 0 || ohead->error > ELAST) {
 			/* Illegal error code */
 			ohead->error = EIO;
@@ -277,6 +314,7 @@ fail:
 	 */
 
 	fdata_set_dead(data);
+
 	return;
 }
 

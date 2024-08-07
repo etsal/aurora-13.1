@@ -110,8 +110,6 @@ static inline int
 fticket_aw_pull_uio(struct fuse_ticket *ftick,
     struct uio *uio);
 
-static int fuse_body_audit(struct fuse_ticket *ftick, size_t blen);
-
 static fuse_handler_t fuse_standard_handler;
 
 static counter_u64_t fuse_ticket_count;
@@ -852,7 +850,7 @@ fticket_out_size(struct fuse_ticket *ftick)
 	}
 }
 
-static int
+int
 fuse_body_audit(struct fuse_ticket *ftick, size_t blen)
 {
 	int err = 0;

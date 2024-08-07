@@ -173,6 +173,7 @@ fticket_opcode(struct fuse_ticket *ftick)
 
 int fticket_pull(struct fuse_ticket *ftick, struct uio *uio);
 size_t fticket_out_size(struct fuse_ticket *ftick);
+int fuse_body_audit(struct fuse_ticket *ftick, size_t blen);
 
 /*
  * The data representing a FUSE session.
