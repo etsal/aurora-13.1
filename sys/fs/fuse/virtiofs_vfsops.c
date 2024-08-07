@@ -333,13 +333,13 @@ virtiofs_vfsop_mount(struct mount *mp)
 static int
 virtiofs_vfsop_unmount(struct mount *mp, int mntflags)
 {
+	int err = 0;
+	int flags = 0;
+
+	vtfs_instance vtfs;
 	struct fuse_data *data;
 	struct fuse_dispatcher fdi;
 	struct thread *td = curthread;
-	vtfs_instance vtfs;
-
-	int err = 0;
-	int flags = 0;
 
 	if (mntflags & MNT_FORCE) {
 		flags |= FORCECLOSE;
@@ -348,8 +348,6 @@ virtiofs_vfsop_unmount(struct mount *mp, int mntflags)
 	if (!data) {
 		panic("no private data for mount point?");
 	}
-	vtfs = data->vtfs;
-
 	/* There is 1 extra root vnode reference (mp->mnt_data). */
 	FUSE_LOCK();
 	if (data->vroot != NULL) {
@@ -360,15 +358,13 @@ virtiofs_vfsop_unmount(struct mount *mp, int mntflags)
 		vrele(vroot);
 	} else
 		FUSE_UNLOCK();
-
 	err = vflush(mp, 0, flags, td);
 	if (err) {
 		return err;
 	}
-
-	if (fdata_get_dead(data))
+	if (fdata_get_dead(data)) {
 		goto alreadydead;
-
+	}
 	if (fsess_maybe_impl(mp, FUSE_DESTROY)) {
 		fdisp_init(&fdi, 0);
 		fdisp_make(&fdi, FUSE_DESTROY, mp, 0, td, NULL);
@@ -377,13 +373,16 @@ virtiofs_vfsop_unmount(struct mount *mp, int mntflags)
 		fdisp_destroy(&fdi);
 	}
 
-	vtfs_drain(vtfs);
-	vtfs_release(vtfs);
-
 	fdata_set_dead(data);
 
 	taskqueue_drain_all(data->vtfs_tq);
 	taskqueue_free(data->vtfs_tq);
+
+	vtfs = data->vtfs;
+	vtfs_drain(vtfs);
+
+	vtfs_unregister_cb(vtfs);
+	vtfs_release(vtfs);
 
 alreadydead:
 	FUSE_LOCK();
@@ -394,9 +393,6 @@ alreadydead:
 	MNT_ILOCK(mp);
 	mp->mnt_data = NULL;
 	MNT_IUNLOCK(mp);
-
-	vtfs_unregister_cb(vtfs);
-	/* XXX Unref the FS instance and release the reference. */
 
 	return 0;
 
