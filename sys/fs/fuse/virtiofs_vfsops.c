@@ -40,6 +40,7 @@
 #include "fuse_kernel.h"
 #include "fuse_internal.h"
 #include "fuse_ipc.h"
+#include "fuse_vfsops.h"
 
 #include <dev/virtio/fs/virtio_fs.h>
 
@@ -48,12 +49,7 @@
 
 #define VIRTIOFS_THREADS_TQ (8)
 
-vfs_fhtovp_t fuse_vfsop_fhtovp;
 static vfs_mount_t virtiofs_vfsop_mount;
-vfs_unmount_t fuse_vfsop_unmount;
-vfs_root_t fuse_vfsop_root;
-vfs_statfs_t fuse_vfsop_statfs;
-vfs_vget_t fuse_vfsop_vget;
 
 /* Only mount/unmount is different compared to fuse. */
 struct vfsops virtiofs_vfsops = {
@@ -329,3 +325,31 @@ virtiofs_vfsop_mount(struct mount *mp)
 
 	return (0);
 }
+
+void
+virtiofs_teardown(struct fuse_data *data)
+{
+	vtfs_instance vtfs = data->vtfs;
+
+	/* Mark the session as dead to prevent new requests. */
+	fdata_set_dead(data);
+
+	/* 
+	 * Flush out all pending requests into the virtio 
+	 * device. After this, there are no host-bound 
+	 * requests in flight.
+	 */
+	taskqueue_drain_all(data->vtfs_tq);
+	taskqueue_free(data->vtfs_tq);
+
+	/*
+	 * Turn off the device and handle all received
+	 * requests. After this there are no guest-bound
+	 * requests in flight, completing virtiofs teardown.
+	 */
+	vtfs_drain(vtfs);
+
+	vtfs_unregister_cb(vtfs);
+	vtfs_release(vtfs);
+}
+

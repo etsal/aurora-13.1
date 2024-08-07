@@ -87,6 +87,7 @@
 #include "fuse_node.h"
 #include "fuse_ipc.h"
 #include "fuse_internal.h"
+#include "fuse_vfsops.h"
 
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>
@@ -111,13 +112,6 @@ SDT_PROBE_DEFINE2(fusefs, , vfsops, trace, "int", "char*");
 #ifndef PRIV_VFS_FUSE_SYNC_UNMOUNT
 #define PRIV_VFS_FUSE_SYNC_UNMOUNT PRIV_VFS_MOUNT_NONUSER
 #endif
-
-vfs_fhtovp_t fuse_vfsop_fhtovp;
-static vfs_mount_t fuse_vfsop_mount;
-vfs_unmount_t fuse_vfsop_unmount;
-vfs_root_t fuse_vfsop_root;
-vfs_statfs_t fuse_vfsop_statfs;
-vfs_vget_t fuse_vfsop_vget;
 
 struct vfsops fuse_vfsops = {
 	.vfs_fhtovp = fuse_vfsop_fhtovp,
@@ -293,7 +287,7 @@ fuse_vfsop_fhtovp(struct mount *mp, struct fid *fhp, int flags,
 	return (0);
 }
 
-static int
+int
 fuse_vfsop_mount(struct mount *mp)
 {
 	int err;
@@ -469,20 +463,6 @@ out:
 	return err;
 }
 
-static void
-fuse_unmount_virtiofs(struct fuse_data *data)
-{
-	vtfs_instance vtfs = data->vtfs;
-
-	taskqueue_drain_all(data->vtfs_tq);
-	taskqueue_free(data->vtfs_tq);
-
-	vtfs_drain(vtfs);
-
-	vtfs_unregister_cb(vtfs);
-	vtfs_release(vtfs);
-}
-
 int
 fuse_vfsop_unmount(struct mount *mp, int mntflags)
 {
@@ -526,11 +506,11 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
 		fdisp_destroy(&fdi);
 	}
 
-	fdata_set_dead(data);
 
-	if (data->vtfs != NULL) {
-		fuse_unmount_virtiofs(data);
-	}
+	if (data->vtfs != NULL)
+		virtiofs_teardown(data);
+	else
+		fdata_set_dead(data);
 
 alreadydead:
 	FUSE_LOCK();
