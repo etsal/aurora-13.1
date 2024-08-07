@@ -32,12 +32,11 @@ struct vtfs_softc;
 typedef struct vtfs_softc *vtfs_instance;
 typedef void (*vtfs_fuse_cb)(void *);
 
-void vtfs_register_cb(vtfs_instance, vtfs_fuse_cb, vtfs_fuse_cb);
+void vtfs_register_cb(vtfs_instance, vtfs_fuse_cb, vtfs_fuse_cb, vtfs_fuse_cb, void *);
 int vtfs_enqueue(vtfs_instance, void *, struct sglist *, int, int, bool);
 int vtfs_find(char *, vtfs_instance *);
 void vtfs_release(vtfs_instance);
 void vtfs_drain(vtfs_instance);
 void vtfs_unregister_cb(vtfs_instance);
-
 
 #endif /* _VIRTIO_FS_H */

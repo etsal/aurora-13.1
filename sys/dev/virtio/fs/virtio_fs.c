@@ -451,14 +451,10 @@ vtfs_attach(device_t dev)
 
 	vtfs_add(sc);
 
+	return (0);
+
 fail:
-	if (error != 0) {
-		/* 
-		 * XXX Expand when we expand detach.
-		 */
-		vtfs_stop(sc);
-		vtfs_free_fsqueues(sc);
-	}
+	vtfs_detach(dev);
 
 	return (error);	
 }
@@ -473,15 +469,14 @@ vtfs_detach(device_t dev)
 
 	vtfs_remove(sc);
 
-	/* XXX Mark the sc as dead. */
+	/* Kill any active FUSE session. */
+	if (sc->vtfs_detach_cb)
+		sc->vtfs_detach_cb(sc->vtfs_detach_cb_arg);
 
-	/* XXX Drain all queues. */
+	vtfs_drain(sc);
 
 	vtfs_stop(sc);
-
 	vtfs_free_fsqueues(sc);
-
-	/* XXX Drop a reference for the sc. */
 
 	VTFS_DEBUG("device detached");
 
@@ -490,10 +485,14 @@ vtfs_detach(device_t dev)
 
 void
 vtfs_register_cb(struct vtfs_softc *sc, vtfs_fuse_cb forget_cb,
-	vtfs_fuse_cb regular_cb)
+	vtfs_fuse_cb regular_cb, vtfs_fuse_cb detach_cb,
+	void *detach_cb_arg)
 {
 	struct vtfs_fsq *fsq;
 	int i;
+
+	sc->vtfs_detach_cb = detach_cb;
+	sc->vtfs_detach_cb_arg = detach_cb_arg;
 
 	for (i = 0; i < sc->vtfs_nqs; i++) {
 		fsq = &sc->vtfs_fsqs[i];
@@ -521,6 +520,8 @@ vtfs_unregister_cb(struct vtfs_softc *sc)
 		FSQ_UNLOCK(fsq);
 	}
 
+	sc->vtfs_detach_cb_arg = NULL;
+	sc->vtfs_detach_cb = NULL;
 }
 
 int
@@ -564,8 +565,14 @@ vtfs_drain_vq(struct vtfs_fsq *fsq)
 	struct virtqueue *vq = fsq->vtfsq_vq;
 	void *ftick;
 
-	if (fsq->vtfsq_cb == NULL)
-		panic("missing virtiofs fuse callback");
+	/* 
+	 * If there is no callback, we don't have an 
+	 * upper-level FUSE session. 
+	 */
+	if (fsq->vtfsq_cb == NULL) {
+		KASSERT(virtqueue_empty(vq), ("virtqueue not empty"));
+		return;
+	}
 
 	vq = fsq->vtfsq_vq;
 

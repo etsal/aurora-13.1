@@ -507,8 +507,8 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
 	}
 
 
-	if (data->vtfs != NULL)
-		virtiofs_teardown(data);
+	if (fsess_get_virtiofs(data))
+		data->virtiofs_unmount_cb((void *)data);
 	else
 		fdata_set_dead(data);
 

@@ -43,6 +43,8 @@ struct vtfs_softc {
 	struct mtx	vtfs_mtx;
 	struct vtfs_fsq	*vtfs_fsqs;
 	bool		vtfs_inuse;	/* protected by the vtfs modulelock */
+	vtfs_fuse_cb	vtfs_detach_cb;
+	void		*vtfs_detach_cb_arg;
 	/* Host-provided config state. */
 	uint8_t 	vtfs_tag[TAG_SIZE + 1];
 	uint32_t 	vtfs_nqs;

@@ -228,7 +228,8 @@ struct fuse_data {
 	/* Fields necessary for virtiofs. */
 	struct vtfs_softc 		*vtfs;
 	struct taskqueue		*vtfs_tq;
-	void 				(*vtfs_flush_cb)(void*, int);
+	void 				(*vtfs_flush_cb)(void *, int);
+	void 				(*virtiofs_unmount_cb)(void *);
 
 };
 

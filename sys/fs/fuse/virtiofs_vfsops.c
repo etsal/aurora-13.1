@@ -265,9 +265,10 @@ virtiofs_vfsop_mount(struct mount *mp)
 	if (error != 0)
 		return (error);
 
-	vtfs_register_cb(vtfs, virtiofs_cb_forget_ticket, virtiofs_cb_complete_ticket);
-
 	data = fdata_alloc(NULL, td->td_ucred);
+
+	vtfs_register_cb(vtfs, virtiofs_cb_forget_ticket, virtiofs_cb_complete_ticket,
+			virtiofs_teardown, data);
 
 	FUSE_LOCK();
 	KASSERT(!fdata_get_dead(data), ("allocated dead session"));
@@ -279,9 +280,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 
 	data->vtfs = vtfs;
 	data->vtfs_flush_cb = virtiofs_flush;
-
-	/* XXX Permission checks on whether we are allowed to mount the virtiofs. */
-
+	data->virtiofs_unmount_cb = virtiofs_teardown;
 	data->mp = mp;
 	/* 
 	 * XXX We currently do not support any mount options. This is due because it is
@@ -327,8 +326,9 @@ virtiofs_vfsop_mount(struct mount *mp)
 }
 
 void
-virtiofs_teardown(struct fuse_data *data)
+virtiofs_teardown(void *arg)
 {
+	struct fuse_data *data = (struct fuse_data *)arg;
 	vtfs_instance vtfs = data->vtfs;
 
 	/* Mark the session as dead to prevent new requests. */

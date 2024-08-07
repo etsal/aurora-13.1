@@ -8,6 +8,6 @@ vfs_root_t fuse_vfsop_root;
 vfs_statfs_t fuse_vfsop_statfs;
 vfs_vget_t fuse_vfsop_vget;
 
-void virtiofs_teardown(struct fuse_data *data);
+void virtiofs_teardown(void *arg);
 
 #endif /* _FUSE_VFSOPS_H_ */
