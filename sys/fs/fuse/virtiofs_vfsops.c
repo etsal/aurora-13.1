@@ -50,7 +50,7 @@
 
 vfs_fhtovp_t fuse_vfsop_fhtovp;
 static vfs_mount_t virtiofs_vfsop_mount;
-static vfs_unmount_t virtiofs_vfsop_unmount;
+vfs_unmount_t fuse_vfsop_unmount;
 vfs_root_t fuse_vfsop_root;
 vfs_statfs_t fuse_vfsop_statfs;
 vfs_vget_t fuse_vfsop_vget;
@@ -59,7 +59,7 @@ vfs_vget_t fuse_vfsop_vget;
 struct vfsops virtiofs_vfsops = {
 	.vfs_fhtovp = fuse_vfsop_fhtovp,
 	.vfs_mount = virtiofs_vfsop_mount,
-	.vfs_unmount = virtiofs_vfsop_unmount,
+	.vfs_unmount = fuse_vfsop_unmount,
 	.vfs_root = fuse_vfsop_root,
 	.vfs_statfs = fuse_vfsop_statfs,
 	.vfs_vget = fuse_vfsop_vget,
@@ -328,72 +328,4 @@ virtiofs_vfsop_mount(struct mount *mp)
 	fuse_internal_send_init(data, td);
 
 	return (0);
-}
-
-static int
-virtiofs_vfsop_unmount(struct mount *mp, int mntflags)
-{
-	int err = 0;
-	int flags = 0;
-
-	vtfs_instance vtfs;
-	struct fuse_data *data;
-	struct fuse_dispatcher fdi;
-	struct thread *td = curthread;
-
-	if (mntflags & MNT_FORCE) {
-		flags |= FORCECLOSE;
-	}
-	data = fuse_get_mpdata(mp);
-	if (!data) {
-		panic("no private data for mount point?");
-	}
-	/* There is 1 extra root vnode reference (mp->mnt_data). */
-	FUSE_LOCK();
-	if (data->vroot != NULL) {
-		struct vnode *vroot = data->vroot;
-
-		data->vroot = NULL;
-		FUSE_UNLOCK();
-		vrele(vroot);
-	} else
-		FUSE_UNLOCK();
-	err = vflush(mp, 0, flags, td);
-	if (err) {
-		return err;
-	}
-	if (fdata_get_dead(data)) {
-		goto alreadydead;
-	}
-	if (fsess_maybe_impl(mp, FUSE_DESTROY)) {
-		fdisp_init(&fdi, 0);
-		fdisp_make(&fdi, FUSE_DESTROY, mp, 0, td, NULL);
-
-		(void)fdisp_wait_answ(&fdi);
-		fdisp_destroy(&fdi);
-	}
-
-	fdata_set_dead(data);
-
-	taskqueue_drain_all(data->vtfs_tq);
-	taskqueue_free(data->vtfs_tq);
-
-	vtfs = data->vtfs;
-	vtfs_drain(vtfs);
-
-	vtfs_unregister_cb(vtfs);
-	vtfs_release(vtfs);
-
-alreadydead:
-	FUSE_LOCK();
-	data->mp = NULL;
-	fdata_trydestroy(data);
-	FUSE_UNLOCK();
-
-	MNT_ILOCK(mp);
-	mp->mnt_data = NULL;
-	MNT_IUNLOCK(mp);
-
-	return 0;
-
 }

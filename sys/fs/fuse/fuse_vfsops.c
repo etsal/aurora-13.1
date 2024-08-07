@@ -81,6 +81,7 @@
 #include <sys/mount.h>
 #include <sys/sysctl.h>
 #include <sys/fcntl.h>
+#include <sys/sglist.h>
 
 #include "fuse.h"
 #include "fuse_node.h"
@@ -89,6 +90,8 @@
 
 #include <sys/priv.h>
 #include <security/mac/mac_framework.h>
+
+#include <dev/virtio/fs/virtio_fs.h>
 
 SDT_PROVIDER_DECLARE(fusefs);
 /* 
@@ -111,7 +114,7 @@ SDT_PROBE_DEFINE2(fusefs, , vfsops, trace, "int", "char*");
 
 vfs_fhtovp_t fuse_vfsop_fhtovp;
 static vfs_mount_t fuse_vfsop_mount;
-static vfs_unmount_t fuse_vfsop_unmount;
+vfs_unmount_t fuse_vfsop_unmount;
 vfs_root_t fuse_vfsop_root;
 vfs_statfs_t fuse_vfsop_statfs;
 vfs_vget_t fuse_vfsop_vget;
@@ -466,7 +469,21 @@ out:
 	return err;
 }
 
-static int
+static void
+fuse_unmount_virtiofs(struct fuse_data *data)
+{
+	vtfs_instance vtfs = data->vtfs;
+
+	taskqueue_drain_all(data->vtfs_tq);
+	taskqueue_free(data->vtfs_tq);
+
+	vtfs_drain(vtfs);
+
+	vtfs_unregister_cb(vtfs);
+	vtfs_release(vtfs);
+}
+
+int
 fuse_vfsop_unmount(struct mount *mp, int mntflags)
 {
 	int err = 0;
@@ -511,6 +528,10 @@ fuse_vfsop_unmount(struct mount *mp, int mntflags)
 
 	fdata_set_dead(data);
 
+	if (data->vtfs != NULL) {
+		fuse_unmount_virtiofs(data);
+	}
+
 alreadydead:
 	FUSE_LOCK();
 	data->mp = NULL;
@@ -522,7 +543,8 @@ alreadydead:
 	mp->mnt_data = NULL;
 	MNT_IUNLOCK(mp);
 
-	dev_rel(fdev);
+	if (fdev != NULL)
+		dev_rel(fdev);
 
 	return 0;
 }
