@@ -186,42 +186,98 @@ virtiofs_cb_forget_ticket(void *xtick, uint32_t len __unused)
 }
 
 static void
+virtiofs_drop_intr_tick(struct fuse_data *data, struct fuse_ticket *ftick)
+{
+	struct fuse_ticket *itick, *x_tick;
+
+	TAILQ_FOREACH_SAFE(itick, &data->aw_head, tk_aw_link, x_tick) {
+		if (itick->tk_unique == ftick->irq_unique) {
+			fuse_aw_remove(itick);
+			fuse_ticket_drop(itick);
+			break;
+		}
+	}
+
+	ftick->irq_unique = 0;
+}
+
+static int
+virtiofs_handle_async_tick(struct mount *mp, struct fuse_ticket *ftick, uint32_t len)
+{
+	panic("unimplemented");
+}
+
+static void
 virtiofs_cb_complete_ticket(void *xtick, uint32_t len)
 {
 	struct fuse_ticket *ftick = xtick;
 	struct fuse_data *data = ftick->tk_data;
+	struct fuse_out_header *ohead = &ftick->tk_aw_ohead;
+	struct mount *mp = data->mp;
 	int err;
 
-	fuse_lck_mtx_lock(data->aw_mtx);
-	fuse_aw_remove(ftick);
-	fuse_lck_mtx_unlock(data->aw_mtx);
+	/* Validate the length field of the out header. */
+	if (len != ohead->len)
+		goto fail;
 
-	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
-
-	/* XXX Do the ohead checks here. */
-
-	/* XXX Merge this with the dev write method that does the same thing. */
-	if (ftick->tk_aw_ohead.error != 0) {
-		err = -ftick->tk_aw_ohead.error;
+	/* Ensure that out headers that return an error are valid. */
+	if (data->linux_errnos != 0 && ohead->error != 0) {
+		err = -ohead->error;
 		if (err < 0 || err >= nitems(linux_to_bsd_errtbl))
-			panic("Unknown error");
+			goto fail;
 
 		/* '-', because it will get flipped again below */
-		ftick->tk_aw_ohead.error = linux_to_bsd_errtbl[err];
+		ohead->error = -linux_to_bsd_errtbl[err];
 	}
 
-	/* XXX Check who this can happen in virtiofs. */
+	if (len > sizeof(*ohead) && ohead->unique != 0 && ohead->error)
+		goto fail;
+
+	/* Remove the ticket from the answer queue. */
+	fuse_lck_mtx_lock(data->aw_mtx);
+	fuse_aw_remove(ftick);
+
+	/* Drop any pending interrupts for the completed ticket. */
 	if (ftick->irq_unique > 0)
-		panic("Unhandled interruption");
+		virtiofs_drop_intr_tick(data, ftick);
+	fuse_lck_mtx_unlock(data->aw_mtx);
 
-	KASSERT(ftick->tk_aw_errno == 0, ("ticket error %d", ftick->tk_aw_errno));
+	if (ohead->unique == 0) {
+		if (virtiofs_handle_async_tick(mp, ftick, len) != 0)
+			goto fail;
+		return;
+	}
 
-	fuse_lck_mtx_unlock(ftick->tk_aw_mtx);
-
-	if (ftick->tk_aw_handler != NULL)
-		ftick->tk_aw_handler(ftick, NULL);
+	if (ftick->tk_aw_handler) {
+		/* Sanitize the linuxism of negative errnos */
+		ohead->error *= -1;
+		if (ohead->error < 0 || ohead->error > ELAST) {
+			/* Illegal error code */
+			ohead->error = EIO;
+			ftick->tk_aw_handler(ftick, NULL);
+			fuse_ticket_drop(ftick);
+			goto fail;
+		} 
+		
+		/* Do our own audit of the length, like fticket_pull(). */
+		if (ftick->tk_aw_handler(ftick, NULL) != 0) {
+			fuse_ticket_drop(ftick);
+			goto fail;
+		}
+	}
 
 	fuse_ticket_drop(ftick);
+
+	return;
+
+fail:
+	/* 
+	 * If the data is somehow invalid, err on the side of caution
+	 * and mark the FUSE session as dead.
+	 */
+
+	fdata_set_dead(data);
+	return;
 }
 
 static int
