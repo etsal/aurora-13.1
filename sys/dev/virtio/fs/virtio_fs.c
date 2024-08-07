@@ -174,18 +174,12 @@ vtfs_vq_intr(void *xfsq)
 	struct virtqueue *vq = fsq->vtfsq_vq;
 	void *ftick;
 
-	/* XXX This might be possible during unload. */
-	if (fsq->vtfsq_cb == NULL)
-		panic("missing virtiofs fuse callback");
+	/* We turn off vtfs interrupts before removing the callback. */
+	KASSERT(fsq->vtfsq_cb != NULL, ("missing fuse callback"));
 
 	FSQ_LOCK(fsq);
 
 again:
-	/* 
-	 * XXX Check whether we are being unloaded? Maybe the same issue
-	 * as above.
-	 */
-
 	/* Go through the tickets one by one, invoke the fuse callback. */
 	while  ((ftick = virtqueue_dequeue(vq, NULL)) != NULL)
 		fsq->vtfsq_cb(ftick);
@@ -564,11 +558,6 @@ vtfs_enqueue(struct vtfs_softc *sc, void *ftick, struct sglist *sg,
 	return (0);
 }
 
-/* XXX This is a misnomer, we are "draining" the vq not in 
- * the sense of virtqueue_drain but rather by draining its
- * input and output queues and turning off its interrupts
- * to prevent the host from reading host changes.
- */
 static void
 vtfs_drain_vq(struct vtfs_fsq *fsq)
 {
@@ -583,11 +572,6 @@ vtfs_drain_vq(struct vtfs_fsq *fsq)
 	while ((ftick = virtqueue_dequeue(vq, NULL)) != NULL) {
 		fsq->vtfsq_cb(ftick);
 	}
-
-	/* 
-	 * XXX Do we need to drain the virtqueues? What about 
-	 * unplugging the device?
-	 */
 
 	KASSERT(virtqueue_empty(vq), ("virtqueue not empty"));
 }
