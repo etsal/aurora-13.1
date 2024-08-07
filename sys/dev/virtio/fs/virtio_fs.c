@@ -561,7 +561,7 @@ vtfs_enqueue(struct vtfs_softc *sc, void *ftick, struct sglist *sg,
 	FSQ_UNLOCK(fsq);
 	sglist_free(sg);
 
-	return (error);
+	return (0);
 }
 
 /* XXX This is a misnomer, we are "draining" the vq not in 
