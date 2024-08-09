@@ -134,8 +134,6 @@ virtiofs_flush(void *xdata, int __unused pending)
 	struct fuse_data *data = xdata;
 	int error;
 
-	/* XXX Account for dead sessions. */
-
 	fuse_lck_mtx_lock(data->ms_mtx);
 
 	while (!STAILQ_EMPTY(&data->ms_head)) {
