@@ -728,6 +728,9 @@ size_t
 fticket_out_size(struct fuse_ticket *ftick)
 {
 	enum fuse_opcode opcode;
+	struct fuse_read_in *read_header;
+	struct fuse_in_header *in_header;
+	size_t len;
 
 	opcode = fticket_opcode(ftick);
 
@@ -769,11 +772,9 @@ fticket_out_size(struct fuse_ticket *ftick)
 		return (sizeof(struct fuse_open_out));
 
 	case FUSE_READ:
-		/* XXX ??? */
-		return (((struct fuse_read_in *)(
-		    (char *)ftick->tk_ms_fiov.base +
-		    sizeof(struct fuse_in_header)
-		    ))->size);
+		in_header = (char *)ftick->tk_ms_fiov.base;
+		read_header = (struct fuse_read_header *)(char *)&in_header[sizeof(*in_header)];
+		return (sizeof(*read_header) + read_header->size);
 
 	case FUSE_WRITE:
 		return (sizeof(struct fuse_write_out));
@@ -791,17 +792,17 @@ fticket_out_size(struct fuse_ticket *ftick)
 		return (0);
 
 	case FUSE_GETXATTR:
+		return (sizeof(fuse_getxattr_out));
+
 	case FUSE_LISTXATTR:
-		/* XXX ?? */
-		return (PAGE_SIZE);
+		return (sizeof(fuse_listxattr_out));
 
 	case FUSE_REMOVEXATTR:
 	case FUSE_FLUSH:
 		return (0);
 
 	case FUSE_INIT:
-		/* XXX? */
-		return (PAGE_SIZE);
+		return (sizeof(struct fuse_init_out));
 
 	case FUSE_OPENDIR:
 		return (sizeof(struct fuse_open_out));
