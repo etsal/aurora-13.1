@@ -176,11 +176,6 @@ virtiofs_flush(void *xdata, int __unused pending)
 static void
 virtiofs_cb_forget_ticket(void *xtick, uint32_t len __unused)
 {
-	struct fuse_ticket *ftick = xtick;
-
-	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
-	KASSERT(!fticket_answered(ftick), ("ticket already answered"));
-	fuse_lck_mtx_unlock(ftick->tk_aw_mtx);
 }
 
 static void
