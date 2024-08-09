@@ -61,34 +61,17 @@ static struct vfsconf virtiofs_vfsconf = {
 	.vfc_flags = VFCF_JAIL | VFCF_SYNTHETIC
 };
 
-static void
-virtiofs_bringdown(void)
-{
-	/* XXX Ensure the virtiofs device is up */
-	/* XXX Ensure file system is mounted */
-	/* XXX Ensure the FUSE file system is up */
-}
-
 static int
 virtiofs_loader(struct module *m, int what, void *arg)
 {
 	int error = 0;
 
 	switch (what) {
-	case MOD_LOAD:			/* kldload */
-		/* 
-		 * XXX Find what initialization we need, most of it
-		 * is already done by fuse and vtfs.
-		 */	
-
-		/* vfs_modevent ignores its first arg */
-		if ((error = vfs_modevent(NULL, what, &virtiofs_vfsconf)))
-			virtiofs_bringdown();
+	case MOD_LOAD:			
+		error = vfs_modevent(NULL, what, &virtiofs_vfsconf);
 		break;
 	case MOD_UNLOAD:
-		if ((error = vfs_modevent(NULL, what, &virtiofs_vfsconf)))
-			return (error);
-		virtiofs_bringdown();
+		error = vfs_modevent(NULL, what, &virtiofs_vfsconf);
 		break;
 	default:
 		return (EINVAL);
