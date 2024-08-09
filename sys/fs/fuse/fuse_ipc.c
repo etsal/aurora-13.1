@@ -724,13 +724,22 @@ fuse_insert_message(struct fuse_ticket *ftick, bool urgent)
 	fuse_lck_mtx_unlock(data->ms_mtx);
 }
 
+/* Special case for read tickets. Reply size depends on the specified length. */
+static size_t
+fticket_out_size_read(struct fuse_ticket *ftick)
+{
+	struct fuse_read_in *read_header;
+	uintptr_t in_header;
+
+	in_header = (uintptr_t) ftick->tk_ms_fiov.base;
+	read_header = (struct fuse_read_in *)(in_header + sizeof(struct fuse_in_header));
+	return (read_header->size);
+}
+
 size_t
 fticket_out_size(struct fuse_ticket *ftick)
 {
 	enum fuse_opcode opcode;
-	struct fuse_read_in *read_header;
-	struct fuse_in_header *in_header;
-	size_t len;
 
 	opcode = fticket_opcode(ftick);
 
@@ -761,7 +770,8 @@ fticket_out_size(struct fuse_ticket *ftick)
 		}
 
 	case FUSE_READLINK:
-		return (PAGE_SIZE);
+		/* We are expecting to read back a POSIX path. */
+		return (PATH_MAX);
 
 	case FUSE_UNLINK:
 	case FUSE_RMDIR:
@@ -772,9 +782,7 @@ fticket_out_size(struct fuse_ticket *ftick)
 		return (sizeof(struct fuse_open_out));
 
 	case FUSE_READ:
-		in_header = (char *)ftick->tk_ms_fiov.base;
-		read_header = (struct fuse_read_header *)(char *)&in_header[sizeof(*in_header)];
-		return (sizeof(*read_header) + read_header->size);
+		return (fticket_out_size_read(ftick));
 
 	case FUSE_WRITE:
 		return (sizeof(struct fuse_write_out));
@@ -792,10 +800,10 @@ fticket_out_size(struct fuse_ticket *ftick)
 		return (0);
 
 	case FUSE_GETXATTR:
-		return (sizeof(fuse_getxattr_out));
+		return (sizeof(struct fuse_getxattr_out));
 
 	case FUSE_LISTXATTR:
-		return (sizeof(fuse_listxattr_out));
+		return (sizeof(struct fuse_listxattr_out));
 
 	case FUSE_REMOVEXATTR:
 	case FUSE_FLUSH:
@@ -808,12 +816,7 @@ fticket_out_size(struct fuse_ticket *ftick)
 		return (sizeof(struct fuse_open_out));
 
 	case FUSE_READDIR:
-		/* XXX EXPLORATORY HACK */
-		return (4096);
-		return (((struct fuse_read_in *)(
-		    (char *)ftick->tk_ms_fiov.base +
-		    sizeof(struct fuse_in_header)
-		    ))->size);
+		return (fticket_out_size_read(ftick));
 
 	case FUSE_RELEASEDIR:
 	case FUSE_FSYNCDIR:
