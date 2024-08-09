@@ -52,7 +52,7 @@
 static vfs_mount_t virtiofs_vfsop_mount;
 
 /* Only mount/unmount is different compared to fuse. */
-struct vfsops virtiofs_vfsops = {
+static struct vfsops virtiofs_vfsops = {
 	.vfs_fhtovp = fuse_vfsop_fhtovp,
 	.vfs_mount = virtiofs_vfsop_mount,
 	.vfs_unmount = fuse_vfsop_unmount,
@@ -60,6 +60,46 @@ struct vfsops virtiofs_vfsops = {
 	.vfs_statfs = fuse_vfsop_statfs,
 	.vfs_vget = fuse_vfsop_vget,
 };
+
+static struct vfsconf virtiofs_vfsconf = {
+	.vfc_version = VFS_VERSION,
+	.vfc_name = "virtiofs",
+	.vfc_vfsops = &virtiofs_vfsops,
+	.vfc_typenum = -1,
+	.vfc_flags = VFCF_JAIL | VFCF_SYNTHETIC
+};
+
+static int
+virtiofs_loader(struct module *m, int what, void *arg)
+{
+	int error = 0;
+
+	switch (what) {
+	case MOD_LOAD:			
+		error = vfs_modevent(NULL, what, &virtiofs_vfsconf);
+		break;
+	case MOD_UNLOAD:
+		error = vfs_modevent(NULL, what, &virtiofs_vfsconf);
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	return (error);
+}
+
+/* Registering the module */
+
+static moduledata_t virtiofs_moddata = {
+	"virtiofs",
+	virtiofs_loader,
+	&virtiofs_vfsconf
+};
+
+DECLARE_MODULE(virtiofs, virtiofs_moddata, SI_SUB_VFS, SI_ORDER_MIDDLE);
+MODULE_DEPEND(virtiofs, fusefs, 1, 1, 1);
+MODULE_DEPEND(virtiofs, vtfs, 1, 1, 1);
+MODULE_VERSION(virtiofs, 1);
 
 /* Push the ticket to the virtiofs device. */
 static int
