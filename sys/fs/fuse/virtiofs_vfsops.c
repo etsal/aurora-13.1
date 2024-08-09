@@ -201,13 +201,13 @@ virtiofs_drop_intr_tick(struct fuse_data *data, struct fuse_ticket *ftick)
 	ftick->irq_unique = 0;
 }
 
-static int
+static void
 virtiofs_handle_async_tick(struct fuse_data *data, struct fuse_ticket *ftick, int oerror)
 {
 	struct mount *mp = data->mp;
 	struct iovec aiov;
 	struct uio uio;
-	int err;
+	int err = 0;
 
 	/* 
 	 * Form a uio and pass it to the message handlers, because unlike other
@@ -236,7 +236,30 @@ virtiofs_handle_async_tick(struct fuse_data *data, struct fuse_ticket *ftick, in
 		err = ENOSYS;
 	}
 
-	return (err);
+	if (err != 0) {
+		printf("WARNING: error %d when handling async message of type %d\n",
+			err, fticket_opcode(ftick));
+	}
+}
+
+static bool
+virtiofs_remove_ticket(struct fuse_data *data, struct fuse_ticket *ftick)
+{
+	struct fuse_ticket *tick, *x_tick;
+
+	mtx_assert(&data->aw_mtx, MA_OWNED);
+
+	TAILQ_FOREACH_SAFE(tick, &data->aw_head, tk_aw_link, x_tick) {
+		if (tick->tk_unique != ftick->tk_aw_ohead.unique)
+			continue;
+
+		MPASS(tick == ftick);
+		fuse_aw_remove(ftick);
+
+		return (true);
+	}
+
+	return (false);
 }
 
 static void
@@ -245,69 +268,94 @@ virtiofs_cb_complete_ticket(void *xtick, uint32_t len)
 	struct fuse_ticket *ftick = xtick;
 	struct fuse_data *data = ftick->tk_data;
 	struct fuse_out_header *ohead = &ftick->tk_aw_ohead;
+	bool found;
 	int err;
 
 	/* Validate the length field of the out header. */
 	if (len != ohead->len)
 		goto fail;
 
+	/* Error responses to tickets do not have a body. */
+	if (len > sizeof(*ohead) && ohead->unique != 0 && ohead->error)
+		goto fail;
+
 	/* Ensure that out headers that return an error are valid. */
 	if (data->linux_errnos != 0 && ohead->error != 0) {
 		err = -ohead->error;
 		if (err < 0 || err >= nitems(linux_to_bsd_errtbl))
-			goto fail;
+			goto fail; 
 
 		/* '-', because it will get flipped again below */
 		ohead->error = -linux_to_bsd_errtbl[err];
 	}
 
-	if (len > sizeof(*ohead) && ohead->unique != 0 && ohead->error)
-		goto fail;
-
 	/* Remove the ticket from the answer queue. */
 	fuse_lck_mtx_lock(data->aw_mtx);
-	fuse_aw_remove(ftick);
+
+	found = virtiofs_remove_ticket(data, ftick);
+
+	/*
+	 * We should not be able to find a non-unique ticket, and
+	 * all unique tickets should still be in the queue.
+	 */
+	KASSERT(found == (ohead->unique != 0),
+		("inconsistency in answer queue:"
+		"found %d unique %lu", found, ohead->unique));
 
 	/* Drop any pending interrupts for the completed ticket. */
-	if (ftick->irq_unique > 0)
+	if (found && ftick->irq_unique > 0)
 		virtiofs_drop_intr_tick(data, ftick);
+
 	fuse_lck_mtx_unlock(data->aw_mtx);
 
-	if (ohead->unique == 0) {
-		if (virtiofs_handle_async_tick(data, ftick, ohead->error) != 0)
-			goto fail;
+	/* Async operations are initiated from the server/host. */
+	if (ohead->unique == 0 && fticket_opcode(ftick) != FUSE_DESTROY) { 
+		virtiofs_handle_async_tick(data, ftick, ohead->error);
 		return;
 	}
 
-	if (ftick->tk_aw_handler) {
-		/* Sanitize the linuxism of negative errnos */
+	/* Otherwise this is a response to an actual operation that we did */
+	if (!ftick->tk_aw_handler) {
+		fuse_ticket_drop(ftick);
+		return;
+	}
+
+	/* Sanitize the linuxism of negative errnos */
+	if (ohead->error < 0)
 		ohead->error *= -1;
 
-		/* Check whether the message body has the right size. */
+	/* If the operation was successful, ensure the size is valid. */
+	if (ohead->error == 0 && ohead->unique != 0) {
 		err = fuse_body_audit(ftick, len - sizeof(*ohead));
 		if (err != 0)
 			goto fail;
-
-		if (ohead->error < 0 || ohead->error > ELAST) {
-			/* Illegal error code */
-			ohead->error = EIO;
-			ftick->tk_aw_handler(ftick, NULL);
-			fuse_ticket_drop(ftick);
-			goto fail;
-		} 
-		
-		/* Do our own audit of the length, like fticket_pull(). */
-		if (ftick->tk_aw_handler(ftick, NULL) != 0) {
-			fuse_ticket_drop(ftick);
-			goto fail;
-		}
 	}
 
+	/* Illegal error code, treat it as EIO. */
+	if (ohead->error < 0 || ohead->error > ELAST)
+		ohead->error = EIO;
+	
+	/* 
+	 * Run the handler. If something goes wrong, kill the session, 
+	 * because the only possible error we can get here is either an
+	 * invalid protocol from the init callback, or an invalid interrupt
+	 * response error.
+	 */
+	err = ftick->tk_aw_handler(ftick, NULL);
+
 	fuse_ticket_drop(ftick);
+
+	if (err != 0)
+		fdata_set_dead(data);
 
 	return;
 
 fail:
+
+	/* Drop the ticket on behalf of the handler that was supposed to run. */
+	if (ftick->tk_aw_handler)
+		fuse_ticket_drop(ftick);
+
 	/* 
 	 * If the data is somehow invalid, err on the side of caution
 	 * and mark the FUSE session as dead.
@@ -327,7 +375,6 @@ virtiofs_vfsop_mount(struct mount *mp)
 	struct fuse_data *data;
 	vtfs_instance vtfs;
 	uint32_t max_read;
-	int linux_errnos;
 	char *tag;
 	int error;
 
@@ -342,8 +389,6 @@ virtiofs_vfsop_mount(struct mount *mp)
 	max_read = maxbcachebuf;
 	(void)vfs_scanopt(opts, "max_read=", "%u", &max_read);
 
-	linux_errnos = 0;
-	(void)vfs_scanopt(opts, "linux_errnos", "%d", &linux_errnos);
 
 
 	/* XXX Remounts not handled for now, but should be easy to code in. */
@@ -385,7 +430,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	data->dataflags |= mntopts | FSESS_VIRTIOFS;
 	data->max_read = max_read;
 	data->daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
-	data->linux_errnos = linux_errnos;
+	data->linux_errnos = 1;
 	data->mnt_flag = mp->mnt_flag & MNT_UPDATEMASK;
 	FUSE_UNLOCK();
 
