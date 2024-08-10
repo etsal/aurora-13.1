@@ -839,6 +839,7 @@ fticket_out_size(struct fuse_ticket *ftick)
 			    sizeof(struct fuse_open_out));
 		}
 
+	case FUSE_INTERRUPT:
 	case FUSE_DESTROY:
 	case FUSE_FALLOCATE:
 		return (0);

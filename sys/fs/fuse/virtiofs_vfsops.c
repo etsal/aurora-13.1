@@ -342,7 +342,7 @@ virtiofs_cb_complete_ticket(void *xtick, uint32_t len)
 	fuse_lck_mtx_unlock(data->aw_mtx);
 
 	/* Async operations are initiated from the server/host. */
-	if (ohead->unique == 0 && fticket_opcode(ftick) != FUSE_DESTROY) { 
+	if (ohead->unique == 0 && !ftick->tk_aw_handler) { 
 		virtiofs_handle_async_tick(data, ftick, ohead->error);
 		return;
 	}
@@ -402,8 +402,9 @@ fail:
 static int
 virtiofs_vfsop_mount(struct mount *mp)
 {
+	/* Turn interrupts on by default, existing virtiofsd servers use them anyway. */
+	const uint64_t mntopts = FSESS_INTR | FSESS_VIRTIOFS;
 	struct thread *td = curthread;
-	const uint64_t mntopts = 0;
 	struct vfsoptlist *opts;
 	struct fuse_data *data;
 	vtfs_instance vtfs;
@@ -421,7 +422,6 @@ virtiofs_vfsop_mount(struct mount *mp)
 
 	max_read = maxbcachebuf;
 	(void)vfs_scanopt(opts, "max_read=", "%u", &max_read);
-
 
 
 	/* XXX Remounts not handled for now, but should be easy to code in. */
@@ -460,7 +460,7 @@ virtiofs_vfsop_mount(struct mount *mp)
 	 * to add. Deliberately defer enabling them until we can reuse the FUSE test
 	 * suite for virtiofs.
 	 */
-	data->dataflags |= mntopts | FSESS_VIRTIOFS;
+	data->dataflags |= mntopts;
 	data->max_read = max_read;
 	data->daemon_timeout = FUSE_MIN_DAEMON_TIMEOUT;
 	data->linux_errnos = 1;
