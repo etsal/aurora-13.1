@@ -65,6 +65,7 @@
 
 #include <sys/param.h>
 #include <sys/refcount.h>
+#include <sys/taskqueue.h>
 
 enum fuse_data_cache_mode {
 	FUSE_CACHE_UC,
@@ -83,6 +84,7 @@ void fiov_init(struct fuse_iov *fiov, size_t size);
 void fiov_teardown(struct fuse_iov *fiov);
 void fiov_refresh(struct fuse_iov *fiov);
 void fiov_adjust(struct fuse_iov *fiov, size_t size);
+int fiov_adjust_nowait(struct fuse_iov *fiov, size_t size);
 
 #define FUSE_DIMALLOC(fiov, spc1, spc2, amnt) do {		\
 	fiov_adjust(fiov, (sizeof(*(spc1)) + (amnt)));		\
@@ -130,6 +132,8 @@ struct fuse_ticket {
 	struct mtx			tk_aw_mtx;
 	fuse_handler_t			*tk_aw_handler;
 	TAILQ_ENTRY(fuse_ticket)	tk_aw_link;
+
+	struct task			tk_vtfs_tk;
 };
 
 #define FT_ANSW  0x01  /* request of ticket has already been answered */
@@ -168,6 +172,8 @@ fticket_opcode(struct fuse_ticket *ftick)
 }
 
 int fticket_pull(struct fuse_ticket *ftick, struct uio *uio);
+size_t fticket_out_size(struct fuse_ticket *ftick);
+int fuse_body_audit(struct fuse_ticket *ftick, size_t blen);
 
 /*
  * The data representing a FUSE session.
@@ -219,6 +225,13 @@ struct fuse_data {
 	uint64_t			isimpl;
 	uint64_t			mnt_flag;
 	enum fuse_data_cache_mode	cache_mode;
+
+	/* Fields necessary for virtiofs. */
+	struct vtfs_softc 		*vtfs;
+	struct taskqueue		*vtfs_tq;
+	void 				(*vtfs_flush_cb)(void *, int);
+	void 				(*virtiofs_unmount_cb)(void *);
+
 };
 
 #define FSESS_DEAD                0x0001 /* session is to be closed */
@@ -240,6 +253,7 @@ struct fuse_data {
 #define FSESS_WARN_WB_CACHE_INCOHERENT 0x400000	/* WB cache incoherent */
 #define	FSESS_WARN_ILLEGAL_INODE  0x800000 /* Illegal inode for new file */
 #define FSESS_WARN_READLINK_EMBEDDED_NUL 0x1000000 /* corrupt READLINK output */
+#define	FSESS_VIRTIOFS 		0x2000000 /* session backed by virtio device */
 #define FSESS_MNTOPTS_MASK	( \
 	FSESS_DAEMON_CAN_SPY | FSESS_PUSH_SYMLINKS_IN | \
 	FSESS_DEFAULT_PERMISSIONS | FSESS_INTR)
@@ -412,6 +426,12 @@ static inline bool
 fdata_get_dead(struct fuse_data *data)
 {
 	return (data->dataflags & FSESS_DEAD);
+}
+
+static inline bool
+fsess_get_virtiofs(struct fuse_data *data)
+{
+	return (data->dataflags & FSESS_VIRTIOFS);
 }
 
 struct fuse_dispatcher {

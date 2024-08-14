@@ -982,7 +982,8 @@ fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio)
 	if ((err = tick->tk_aw_ohead.error)) {
 		goto out;
 	}
-	if ((err = fticket_pull(tick, uio))) {
+
+	if (!fsess_get_virtiofs(data) && (err = fticket_pull(tick, uio))) {
 		goto out;
 	}
 	fiio = fticket_resp(tick)->base;
@@ -1001,7 +1002,8 @@ fuse_internal_init_callback(struct fuse_ticket *tick, struct uio *uio)
 	}
 
 	if (fuse_libabi_geq(data, 7, 5)) {
-		if (fticket_resp(tick)->len == sizeof(struct fuse_init_out) ||
+		if (fsess_get_virtiofs(data) ||
+		    fticket_resp(tick)->len == sizeof(struct fuse_init_out) ||
 		    fticket_resp(tick)->len == FUSE_COMPAT_22_INIT_OUT_SIZE) {
 			data->max_write = fiio->max_write;
 			if (fiio->flags & FUSE_ASYNC_READ)

@@ -76,6 +76,7 @@
 #include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/sdt.h>
+#include <sys/sglist.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
 #include <sys/syscallsubr.h>
@@ -86,6 +87,8 @@
 #include "fuse_node.h"
 #include "fuse_ipc.h"
 #include "fuse_internal.h"
+
+#include <dev/virtio/fs/virtio_fs.h>
 
 SDT_PROVIDER_DECLARE(fusefs);
 /* 
@@ -106,8 +109,6 @@ static int fticket_wait_answer(struct fuse_ticket *ftick);
 static inline int 
 fticket_aw_pull_uio(struct fuse_ticket *ftick,
     struct uio *uio);
-
-static int fuse_body_audit(struct fuse_ticket *ftick, size_t blen);
 
 static fuse_handler_t fuse_standard_handler;
 
@@ -276,17 +277,19 @@ fiov_teardown(struct fuse_iov *fiov)
 	free(fiov->base, M_FUSEMSG);
 }
 
-void
-fiov_adjust(struct fuse_iov *fiov, size_t size)
+static int
+fiov_adjust_internal(struct fuse_iov *fiov, size_t size, int flag)
 {
+	KASSERT(flag == M_NOWAIT || flag == M_WAITOK, ("invalid flag %x", flag));
+
 	if (fiov->allocated_size < size ||
 	    (fuse_iov_permanent_bufsize >= 0 &&
 	    fiov->allocated_size - size > fuse_iov_permanent_bufsize &&
 	    --fiov->credit < 0)) {
 		fiov->base = realloc(fiov->base, FU_AT_LEAST(size), M_FUSEMSG,
-		    M_WAITOK | M_ZERO);
+		    flag | M_ZERO);
 		if (!fiov->base) {
-			panic("FUSE: realloc failed");
+			return (ENOMEM);
 		}
 		fiov->allocated_size = FU_AT_LEAST(size);
 		fiov->credit = fuse_iov_credit;
@@ -297,6 +300,26 @@ fiov_adjust(struct fuse_iov *fiov, size_t size)
 		bzero((char*)fiov->base + fiov->len, size - fiov->len);
 	}
 	fiov->len = size;
+
+	return(0);
+}
+
+int
+fiov_adjust_nowait(struct fuse_iov *fiov, size_t size)
+{
+	fiov_adjust_internal(fiov, size, M_NOWAIT);
+	if (!fiov->base)
+		return (ENOMEM);
+
+	return (0);
+}
+
+void
+fiov_adjust(struct fuse_iov *fiov, size_t size)
+{
+	fiov_adjust_internal(fiov, size, M_WAITOK);
+	if (!fiov->base)
+		panic("FUSE: realloc failed");
 }
 
 /* Resize the fiov if needed, and clear it's buffer */
@@ -646,6 +669,25 @@ fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t * handler)
 	fuse_lck_mtx_unlock(ftick->tk_data->aw_mtx);
 }
 
+
+/* Notify users of the FUSE device of the new ticket. */
+static void
+fuse_notify_fuse_device(struct fuse_data *data)
+{
+	wakeup_one(data);
+	selwakeuppri(&data->ks_rsel, PZERO + 1);
+	KNOTE_LOCKED(&data->ks_rsel.si_note, 0);
+}
+
+static void
+fuse_notify_virtiofs(struct fuse_ticket *ftick)
+{
+	struct fuse_data *data = ftick->tk_data;
+	
+	TASK_INIT(&ftick->tk_vtfs_tk, 0, data->vtfs_flush_cb, data);
+	taskqueue_enqueue(data->vtfs_tq, &ftick->tk_vtfs_tk);
+}
+
 /*
  * Insert a new upgoing ticket into the message queue
  *
@@ -655,26 +697,165 @@ fuse_insert_callback(struct fuse_ticket *ftick, fuse_handler_t * handler)
 void
 fuse_insert_message(struct fuse_ticket *ftick, bool urgent)
 {
+	struct fuse_data *data = ftick->tk_data;
+
 	if (ftick->tk_flag & FT_DIRTY) {
 		panic("FUSE: ticket reused without being refreshed");
 	}
 	ftick->tk_flag |= FT_DIRTY;
 
-	if (fdata_get_dead(ftick->tk_data)) {
+	if (fdata_get_dead(data)) {
 		return;
 	}
-	fuse_lck_mtx_lock(ftick->tk_data->ms_mtx);
+
+	fuse_lck_mtx_lock(data->ms_mtx);
+
 	if (urgent)
 		fuse_ms_push_head(ftick);
 	else
 		fuse_ms_push(ftick);
-	wakeup_one(ftick->tk_data);
-	selwakeuppri(&ftick->tk_data->ks_rsel, PZERO + 1);
-	KNOTE_LOCKED(&ftick->tk_data->ks_rsel.si_note, 0);
-	fuse_lck_mtx_unlock(ftick->tk_data->ms_mtx);
+
+	/* Choose between the virtiofs and FUSE paths. */ 
+	if (fsess_get_virtiofs(data))
+		fuse_notify_virtiofs(ftick);
+	else
+		fuse_notify_fuse_device(data);
+
+	fuse_lck_mtx_unlock(data->ms_mtx);
 }
 
-static int
+/* Special case for read tickets. Reply size depends on the specified length. */
+static size_t
+fticket_out_size_read(struct fuse_ticket *ftick)
+{
+	struct fuse_read_in *read_header;
+	uintptr_t in_header;
+
+	in_header = (uintptr_t) ftick->tk_ms_fiov.base;
+	read_header = (struct fuse_read_in *)(in_header + sizeof(struct fuse_in_header));
+	return (read_header->size);
+}
+
+size_t
+fticket_out_size(struct fuse_ticket *ftick)
+{
+	enum fuse_opcode opcode;
+
+	opcode = fticket_opcode(ftick);
+
+	switch (opcode) {
+	case FUSE_BMAP:
+		return (sizeof(struct fuse_bmap_out));
+
+	case FUSE_LINK:
+	case FUSE_LOOKUP:
+	case FUSE_MKDIR:
+	case FUSE_MKNOD:
+	case FUSE_SYMLINK:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 9)) {
+			return (sizeof(struct fuse_entry_out));
+		} else {
+			return (FUSE_COMPAT_ENTRY_OUT_SIZE);
+		}
+
+	case FUSE_FORGET:
+		return (0);
+
+	case FUSE_GETATTR:
+	case FUSE_SETATTR:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 9)) {
+			return (sizeof(struct fuse_attr_out));
+		} else {
+			return (FUSE_COMPAT_ATTR_OUT_SIZE);
+		}
+
+	case FUSE_READLINK:
+		/* We are expecting to read back a POSIX path. */
+		return (PATH_MAX);
+
+	case FUSE_UNLINK:
+	case FUSE_RMDIR:
+	case FUSE_RENAME:
+		return (0);
+
+	case FUSE_OPEN:
+		return (sizeof(struct fuse_open_out));
+
+	case FUSE_READ:
+		return (fticket_out_size_read(ftick));
+
+	case FUSE_WRITE:
+		return (sizeof(struct fuse_write_out));
+
+	case FUSE_STATFS:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 4)) {
+			return (sizeof(struct fuse_statfs_out));
+		} else {
+			return (FUSE_COMPAT_STATFS_SIZE);
+		}
+
+	case FUSE_RELEASE:
+	case FUSE_FSYNC:
+	case FUSE_SETXATTR:
+		return (0);
+
+	case FUSE_GETXATTR:
+		return (sizeof(struct fuse_getxattr_out));
+
+	case FUSE_LISTXATTR:
+		return (sizeof(struct fuse_listxattr_out));
+
+	case FUSE_REMOVEXATTR:
+	case FUSE_FLUSH:
+		return (0);
+
+	case FUSE_INIT:
+		return (sizeof(struct fuse_init_out));
+
+	case FUSE_OPENDIR:
+		return (sizeof(struct fuse_open_out));
+
+	case FUSE_READDIR:
+		return (fticket_out_size_read(ftick));
+
+	case FUSE_RELEASEDIR:
+	case FUSE_FSYNCDIR:
+		return (0);
+
+	case FUSE_GETLK:
+		return (sizeof(struct fuse_lk_out));
+
+	case FUSE_SETLK:
+	case FUSE_SETLKW:
+	case FUSE_ACCESS:
+		return (0);
+
+	case FUSE_CREATE:
+		if (fuse_libabi_geq(ftick->tk_data, 7, 9)) {
+			return (sizeof(struct fuse_entry_out) +
+			    sizeof(struct fuse_open_out));
+		} else {
+			return (FUSE_COMPAT_ENTRY_OUT_SIZE +
+			    sizeof(struct fuse_open_out));
+		}
+
+	case FUSE_INTERRUPT:
+	case FUSE_DESTROY:
+	case FUSE_FALLOCATE:
+		return (0);
+
+	case FUSE_LSEEK:
+		return (sizeof(struct fuse_lseek_out));
+
+	case FUSE_COPY_FILE_RANGE:
+		return (sizeof(struct fuse_write_out));
+
+	default:
+		panic("FUSE: opcodes out of sync (%d)\n", opcode);
+	}
+}
+
+int
 fuse_body_audit(struct fuse_ticket *ftick, size_t blen)
 {
 	int err = 0;
@@ -887,7 +1068,9 @@ fuse_standard_handler(struct fuse_ticket *ftick, struct uio *uio)
 {
 	int err = 0;
 
-	err = fticket_pull(ftick, uio);
+	/* Data already pulled for virtiofs. */
+	if (uio != NULL)
+		err = fticket_pull(ftick, uio);
 
 	fuse_lck_mtx_lock(ftick->tk_aw_mtx);
 
